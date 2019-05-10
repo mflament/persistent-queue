@@ -1,0 +1,40 @@
+# Directories #
+/build/
+*/bin/
+target
+node_modules/
+ 
+# OS Files #
+.DS_Store
+
+######################
+# Eclipse
+######################
+.project
+.metadata
+.classpath
+.settings/
+.loadpath
+local.properties
+*.launch
+# APT Eclipse annotation processor
+.factorypath
+
+# IntelliJ Files
+.idea/
+*.iml
+*.iws
+
+# MacOs Files
+.DS_Store
+.Spotlight-V100
+.Trashes
+._*
+
+# Windows Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+#db (dbeaver)
+.dbeaver-data-sources.xml
