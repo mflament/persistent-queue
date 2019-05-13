@@ -1,54 +1,78 @@
 /**
  * 
  */
-package org.yah.tools.queue.persistent;
+package org.yah.tools.collection.queue;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
+import org.yah.tools.collection.ringbuffer.RingBuffer;
 
 /**
- * @author Oodrive
+ * @author Yah
  * @created 2019/05/10
  */
 public class PersistentQueue<E> implements BlockingQueue<E> {
 
+	public interface ElementReader<E> {
+
+		E read(byte[] buffer, int offset, int length) throws IOException;
+
+		void write(E element, byte[] buffer, int offset) throws IOException;
+
+	}
+
+	private final RingBuffer ringBufer;
+
+	private final Queue<E> elementBuffer;
+
+	public PersistentQueue(RingBuffer ringBufer) {
+		this.ringBufer = Objects.requireNonNull(ringBufer, "ringBufer is null");
+		elementBuffer = new ConcurrentLinkedQueue<>();
+	}
+
 	@Override
 	public E remove() {
-		// TODO Auto-generated method stub
-		return null;
+		E res = poll();
+		if (res == null)
+			throw new NoSuchElementException();
+		return res;
 	}
 
 	@Override
 	public E poll() {
-		// TODO Auto-generated method stub
-		return null;
+		return elementBuffer.poll();
 	}
 
 	@Override
 	public E element() {
-		// TODO Auto-generated method stub
-		return null;
+		E res = peek();
+		if (res == null)
+			throw new NoSuchElementException();
+		return res;
 	}
 
 	@Override
 	public E peek() {
-		// TODO Auto-generated method stub
-		return null;
+		return elementBuffer.peek();
 	}
 
 	@Override
 	public int size() {
-		// TODO Auto-generated method stub
-		return 0;
+		return ringBufer.size();
 	}
 
 	@Override
 	public boolean isEmpty() {
-		// TODO Auto-generated method stub
-		return false;
+		return ringBufer.size() == 0;
 	}
 
 	@Override
