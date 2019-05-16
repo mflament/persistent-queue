@@ -81,4 +81,5 @@ public interface RingBuffer {
 	 * @return the current buffer size (in bytes)
 	 */
 	int size();
+		
 }

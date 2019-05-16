@@ -3,66 +3,93 @@
  */
 package org.yah.tools.collection.queue;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.BufferUnderflowException;
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.NoSuchElementException;
-import java.util.Objects;
-import java.util.Queue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
-import org.yah.tools.collection.ringbuffer.RingBuffer;
+import org.yah.tools.collection.ringbuffer.AbstractRingBuffer.State;
+import org.yah.tools.collection.ringbuffer.FileRingBuffer;
 
 /**
  * @author Yah
  * @created 2019/05/10
  */
-public class PersistentQueue<E> implements BlockingQueue<E> {
+public class PersistentQueue<E> implements SimpleQueue<E> {
 
-	public interface ElementReader<E> {
+	private static final int BUFFERS_INITIAL_CAPACITY = 4 * 1024;
 
-		E read(byte[] buffer, int offset, int length) throws IOException;
+	private final FileRingBuffer ringBufer;
 
-		void write(E element, byte[] buffer, int offset) throws IOException;
+	private final ElementReader<E> elementReader;
 
-	}
+	private SizedElement<E> head;
 
-	private final RingBuffer ringBufer;
+	private final ReadBuffer readBuffer;
 
-	private final Queue<E> elementBuffer;
+	private final DirectByteArrayOutputStream writeBuffer;
 
-	public PersistentQueue(RingBuffer ringBufer) {
-		this.ringBufer = Objects.requireNonNull(ringBufer, "ringBufer is null");
-		elementBuffer = new ConcurrentLinkedQueue<>();
-	}
-
-	@Override
-	public E remove() {
-		E res = poll();
-		if (res == null)
-			throw new NoSuchElementException();
-		return res;
+	public PersistentQueue(ElementReader<E> elementReader, File file) {
+		this.elementReader = elementReader;
+		ringBufer = new FileRingBuffer(file);
+		readBuffer = new ReadBuffer(BUFFERS_INITIAL_CAPACITY);
+		writeBuffer = new DirectByteArrayOutputStream(BUFFERS_INITIAL_CAPACITY);
+		head = readBuffer.readElement(0);
 	}
 
 	@Override
-	public E poll() {
-		return elementBuffer.poll();
+	public Iterator<E> iterator() {
+		return new PersistentQueueIterator();
 	}
 
 	@Override
-	public E element() {
-		E res = peek();
-		if (res == null)
-			throw new NoSuchElementException();
-		return res;
+	public void offer(Collection<E> elements) {
+		if (elements.isEmpty())
+			return;
+		synchronized (writeBuffer) {
+			writeBuffer.reset();
+			Iterator<E> iterator = elements.iterator();
+			E newHead = iterator.next();
+			int newHeadSize = writeBuffer.writeElement(newHead);
+			iterator.forEachRemaining(writeBuffer::writeElement);
+			ringBufer.write(writeBuffer.getBuffer(), 0, writeBuffer.size());
+			setHead(new SizedElement<>(newHead, newHeadSize));
+		}
 	}
 
 	@Override
-	public E peek() {
-		return elementBuffer.peek();
+	public void consume(Consumer<E> consumer) throws InterruptedException {
+		SizedElement<E> e = peekHead();
+		consumer.accept(e.element);
+		ringBufer.remove(Integer.SIZE + e.size);
+		nextHead();
+	}
+
+	private synchronized SizedElement<E> peekHead() throws InterruptedException {
+		while (head == null) {
+			wait();
+		}
+		return head;
+	}
+
+	private synchronized void setHead(SizedElement<E> newHead) {
+		if (head == null) {
+			head = newHead;
+			notifyAll();
+		}
+	}
+
+	private synchronized void nextHead() {
+		if (ringBufer.size() > 0) {
+			head = readBuffer.readElement(0);
+		} else {
+			head = null;
+		}
 	}
 
 	@Override
@@ -70,123 +97,144 @@ public class PersistentQueue<E> implements BlockingQueue<E> {
 		return ringBufer.size();
 	}
 
-	@Override
-	public boolean isEmpty() {
-		return ringBufer.size() == 0;
+	private class ReadBuffer extends InputStream {
+
+		private byte[] readBuffer;
+
+		private int readPosition;
+
+		private int size;
+
+		public ReadBuffer(int capacity) {
+			readBuffer = new byte[capacity];
+		}
+
+		@Override
+		public int read() throws IOException {
+			if (readPosition < size)
+				return readBuffer[readPosition++];
+			return -1;
+		}
+
+		@Override
+		public int read(byte[] b, int off, int len) throws IOException {
+			int remaining = size - readPosition;
+			if (remaining == 0)
+				return 0;
+			len = Math.min(remaining, len);
+			System.arraycopy(readBuffer, readPosition, b, off, len);
+			readPosition += len;
+			return len;
+		}
+
+		private void fill(int position, int length) {
+			int remaining = ringBufer.size() - position;
+			if (remaining < 0)
+				throw new BufferUnderflowException();
+			if (readBuffer.length < length)
+				readBuffer = new byte[(int) (length * 1.5f)];
+			size = ringBufer.read(position, readBuffer, 0, length);
+			readPosition = 0;
+		}
+
+		public SizedElement<E> readElement(int position) {
+			if (ringBufer.size() == 0)
+				return null;
+
+			try {
+				int size = readInt(position);
+				fill(position + Integer.SIZE, size);
+				return new SizedElement<>(elementReader.read(this), size);
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+		}
+
+		private int readInt(int position) throws IOException {
+			fill(position, Integer.SIZE);
+			return Byte.toUnsignedInt(readBuffer[0]) << 24 |
+					Byte.toUnsignedInt(readBuffer[1]) << 16 |
+					Byte.toUnsignedInt(readBuffer[2]) << 8 |
+					Byte.toUnsignedInt(readBuffer[3]);
+		}
 	}
 
-	@Override
-	public Iterator<E> iterator() {
-		// TODO Auto-generated method stub
-		return null;
-	}
+	private class DirectByteArrayOutputStream extends ByteArrayOutputStream {
 
-	@Override
-	public Object[] toArray() {
-		// TODO Auto-generated method stub
-		return null;
-	}
+		public DirectByteArrayOutputStream() {
+			super();
+		}
 
-	@Override
-	public <T> T[] toArray(T[] a) {
-		// TODO Auto-generated method stub
-		return null;
-	}
+		public DirectByteArrayOutputStream(int size) {
+			super(size);
+		}
 
-	@Override
-	public boolean containsAll(Collection<?> c) {
-		// TODO Auto-generated method stub
-		return false;
-	}
+		public final byte[] getBuffer() {
+			return buf;
+		}
 
-	@Override
-	public boolean addAll(Collection<? extends E> c) {
-		// TODO Auto-generated method stub
-		return false;
-	}
+		public final int writeElement(E element) {
+			skip(Integer.SIZE);
+			int position = size();
+			try {
+				elementReader.write(element, this);
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+			int elementSize = size() - position;
+			writeInt(position - Integer.SIZE, elementSize);
+			return elementSize;
+		}
 
-	@Override
-	public boolean removeAll(Collection<?> c) {
-		// TODO Auto-generated method stub
-		return false;
-	}
+		private void writeInt(int index, int i) {
+			buf[index] = (byte) (i >> 24);
+			buf[index + 1] = (byte) (i >> 16);
+			buf[index + 2] = (byte) (i >> 8);
+			buf[index + 3] = (byte) i;
+		}
 
-	@Override
-	public boolean retainAll(Collection<?> c) {
-		// TODO Auto-generated method stub
-		return false;
-	}
-
-	@Override
-	public void clear() {
-		// TODO Auto-generated method stub
+		private void skip(int n) {
+			for (int i = 0; i < n; i++)
+				write(0);
+		}
 
 	}
 
-	@Override
-	public boolean add(E e) {
-		// TODO Auto-generated method stub
-		return false;
+	private final static class SizedElement<E> {
+		private final E element;
+		private final int size;
+
+		private SizedElement(E element, int size) {
+			super();
+			this.element = element;
+			this.size = size;
+		}
 	}
 
-	@Override
-	public boolean offer(E e) {
-		// TODO Auto-generated method stub
-		return false;
+	private final class PersistentQueueIterator implements Iterator<E> {
+
+		private final ReadBuffer readBuffer;
+
+		private State ringState;
+
+		private int position;
+
+		public PersistentQueueIterator() {
+			readBuffer = new ReadBuffer(BUFFERS_INITIAL_CAPACITY);
+			ringState = ringBufer.getState();
+		}
+
+		@Override
+		public boolean hasNext() {
+			// TODO Auto-generated method stub
+			return false;
+		}
+
+		@Override
+		public E next() {
+			// TODO Auto-generated method stub
+			return null;
+		}
+
 	}
-
-	@Override
-	public void put(E e) throws InterruptedException {
-		// TODO Auto-generated method stub
-
-	}
-
-	@Override
-	public boolean offer(E e, long timeout, TimeUnit unit) throws InterruptedException {
-		// TODO Auto-generated method stub
-		return false;
-	}
-
-	@Override
-	public E take() throws InterruptedException {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
-	@Override
-	public E poll(long timeout, TimeUnit unit) throws InterruptedException {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
-	@Override
-	public int remainingCapacity() {
-		// TODO Auto-generated method stub
-		return 0;
-	}
-
-	@Override
-	public boolean remove(Object o) {
-		// TODO Auto-generated method stub
-		return false;
-	}
-
-	@Override
-	public boolean contains(Object o) {
-		// TODO Auto-generated method stub
-		return false;
-	}
-
-	@Override
-	public int drainTo(Collection<? super E> c) {
-		// TODO Auto-generated method stub
-		return 0;
-	}
-
-	@Override
-	public int drainTo(Collection<? super E> c, int maxElements) {
-		// TODO Auto-generated method stub
-		return 0;
-	}
-
 }

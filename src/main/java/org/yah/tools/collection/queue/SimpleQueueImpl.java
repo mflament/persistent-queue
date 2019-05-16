@@ -13,7 +13,7 @@ import java.util.function.Consumer;
 import org.yah.tools.collection.ringbuffer.RingBuffer;
 
 public class SimpleQueueImpl<E> implements SimpleQueue<E> {
-	
+
 	public interface ElementReader<E> {
 
 		E read(byte[] buffer, int offset, int length);
@@ -26,10 +26,20 @@ public class SimpleQueueImpl<E> implements SimpleQueue<E> {
 
 	private final BlockingQueue<E> elementBuffer;
 
+	private byte[] buffer;
+
+	private int maxElementSize;
+
+	private final Object writerMonitor = new Object();
+
 	public SimpleQueueImpl(RingBuffer ringBuffer) {
+		this(ringBuffer, 1024 * 4);
+	}
+
+	public SimpleQueueImpl(RingBuffer ringBuffer, int maxElementSize) {
 		this.ringBufer = Objects.requireNonNull(ringBuffer, "ringBuffer is null");
 		this.elementBuffer = new LinkedBlockingQueue<>();
-		
+
 	}
 
 	@Override

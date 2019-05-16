@@ -12,7 +12,7 @@ public interface SimpleQueue<E> extends Iterable<E> {
 		offer(Collections.singleton(element));
 	}
 
-	void consume(Consumer<E> consumer);
+	void consume(Consumer<E> consumer) throws InterruptedException;
 
 	int size();
 

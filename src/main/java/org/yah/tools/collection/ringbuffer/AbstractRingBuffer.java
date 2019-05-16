@@ -35,7 +35,7 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 		this.linearBuffer = linearBuffer;
 	}
 
-	public void setLimit(int limit) {
+	public final void setLimit(int limit) {
 		this.limit = limit > 0 ? Utils.nextPowerOfTwo(limit) : 0;
 	}
 
@@ -48,11 +48,11 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 		this.size = size;
 	}
 
-	protected T linearBuffer() {
+	protected final T linearBuffer() {
 		return linearBuffer;
 	}
 
-	protected int startPosition() {
+	protected final int startPosition() {
 		return startPosition;
 	}
 
@@ -67,6 +67,10 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 
 	protected final int wrap(int position) {
 		return wrap(position, capacity());
+	}
+
+	public synchronized State getState() {
+		return new State(startPosition, cycle, size, linearBuffer.capacity());
 	}
 
 	@Override
@@ -199,4 +203,41 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 
 	}
 
+	public static final class State {
+		private final int startPosition;
+		private final long cycle;
+		private final int size;
+		private final int capacity;
+
+		private State(int startPosition, long cycle, int size, int capacity) {
+			super();
+			this.startPosition = startPosition;
+			this.cycle = cycle;
+			this.size = size;
+			this.capacity = capacity;
+		}
+
+		public int getStartPosition() {
+			return startPosition;
+		}
+
+		public long getCycle() {
+			return cycle;
+		}
+
+		public int getSize() {
+			return size;
+		}
+
+		public int getCapacity() {
+			return capacity;
+		}
+
+		@Override
+		public String toString() {
+			return String.format("State [startPosition=%s, cycle=%s, size=%s, capacity=%s]", startPosition, cycle, size,
+					capacity);
+		}
+
+	}
 }
