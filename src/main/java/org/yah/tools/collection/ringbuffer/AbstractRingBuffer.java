@@ -1,5 +1,8 @@
 package org.yah.tools.collection.ringbuffer;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.BufferOverflowException;
 import java.util.Objects;
 
@@ -13,11 +16,9 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 
 	private int limit;
 
-	private int startPosition;
+	private final RingPosition startPosition = new RingPosition();
 
 	private int size;
-
-	private long cycle;
 
 	private T linearBuffer;
 
@@ -40,11 +41,7 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 	}
 
 	protected final void restore(int startPosition, int size) {
-		if (startPosition < 0 || startPosition >= size)
-			throw new IllegalArgumentException("Invalid start position " + startPosition);
-		if (size < 0)
-			throw new IllegalArgumentException("Invalid size " + size);
-		this.startPosition = startPosition;
+		this.startPosition.position = startPosition;
 		this.size = size;
 	}
 
@@ -52,7 +49,7 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 		return linearBuffer;
 	}
 
-	protected final int startPosition() {
+	protected final RingPosition startPosition() {
 		return startPosition;
 	}
 
@@ -67,10 +64,6 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 
 	protected final int wrap(int position) {
 		return wrap(position, capacity());
-	}
-
-	public synchronized State getState() {
-		return new State(startPosition, cycle, size, linearBuffer.capacity());
 	}
 
 	@Override
@@ -99,28 +92,34 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 			linearBuffer.write(p, source, offset + o, l);
 		});
 
-		update(startPosition, size + length);
+		updateSize(size + length);
 	}
 
 	@Override
-	public int remove(int removed) {
-		removed = Math.min(size, removed);
-		int newStartPosition = startPosition + removed;
-		if (newStartPosition > capacity()) {
-			newStartPosition = wrap(newStartPosition);
-			cycle++;
-		}
-		update(newStartPosition, size - removed);
+	public synchronized int remove(int count) {
+		int removed = Math.min(size, count);
+		startPosition.advance(removed, capacity());
+		this.size -= removed;
 		return removed;
 	}
 
-	private synchronized int writePosition() {
-		return startPosition + size;
+	@Override
+	public InputStream reader() {
+		return new RingBufferInputStream();
 	}
 
-	private void update(int startPosition, int size) {
+	@Override
+	public OutputStream writer() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	private synchronized int writePosition() {
+		return startPosition.position + size;
+	}
+
+	private void updateSize(int size) {
 		synchronized (this) {
-			this.startPosition = startPosition;
 			this.size = size;
 		}
 		onChange(startPosition, size);
@@ -138,19 +137,20 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 			T newBuffer = allocate(newCapacity);
 			int writePosition = writePosition();
 
+			int pos = startPosition.position;
 			if (writePosition > capacity) {
 				// wrapped, transfer tail of ring from buffer start to buffer end
 				writePosition = wrap(writePosition, capacity);
-				linearBuffer.copyTo(newBuffer, startPosition, startPosition, capacity - startPosition);
+				linearBuffer.copyTo(newBuffer, pos, pos, capacity - pos);
 				linearBuffer.copyTo(newBuffer, 0, capacity, writePosition);
 			} else {
-				linearBuffer.copyTo(newBuffer, startPosition, startPosition, writePosition - startPosition);
+				linearBuffer.copyTo(newBuffer, pos, pos, writePosition - pos);
 			}
 			linearBuffer = newBuffer;
 		}
 	}
 
-	protected void onChange(int startPosition, int size) {}
+	protected void onChange(RingPosition startPosition, int size) {}
 
 	protected final void execute(int position, int length, RingAction action) {
 		int capacity = capacity();
@@ -186,6 +186,34 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 		return position & (capacity - 1);
 	}
 
+	protected class RingPosition {
+
+		private long cycle;
+
+		private int position;
+
+		public RingPosition() {}
+
+		public RingPosition(long cycle, int position) {
+			this.cycle = cycle;
+			this.position = position;
+		}
+
+		public RingPosition(RingPosition pos) {
+			cycle = pos.cycle;
+			position = pos.position;
+		}
+
+		private void advance(int length, int capacity) {
+			int nextPos = position + length;
+			if (nextPos > capacity) {
+				nextPos = wrap(nextPos, capacity);
+				cycle++;
+			}
+			position = nextPos;
+		}
+	}
+
 	@FunctionalInterface
 	protected interface RingAction {
 		void apply(int position, int length, int offset);
@@ -203,40 +231,40 @@ public abstract class AbstractRingBuffer<T extends LinearBuffer> implements Ring
 
 	}
 
-	public static final class State {
-		private final int startPosition;
-		private final long cycle;
-		private final int size;
-		private final int capacity;
+	protected final class RingBufferInputStream extends InputStream {
 
-		private State(int startPosition, long cycle, int size, int capacity) {
-			super();
-			this.startPosition = startPosition;
-			this.cycle = cycle;
-			this.size = size;
-			this.capacity = capacity;
-		}
+		private byte[] singleByteBuffer = new byte[1];
 
-		public int getStartPosition() {
-			return startPosition;
-		}
+		private final RingPosition ringPosition;
 
-		public long getCycle() {
-			return cycle;
-		}
-
-		public int getSize() {
-			return size;
-		}
-
-		public int getCapacity() {
-			return capacity;
+		public RingBufferInputStream() {
+			this.ringPosition = new RingPosition(startPosition);
 		}
 
 		@Override
-		public String toString() {
-			return String.format("State [startPosition=%s, cycle=%s, size=%s, capacity=%s]", startPosition, cycle, size,
-					capacity);
+		public int read() throws IOException {
+			if (ringPosition.)
+		}
+
+		@Override
+		public int read(byte[] b, int off, int len) throws IOException {
+			int available = available();
+		
+			// TODO Auto-generated method stub
+			return super.read(b, off, len);
+		}
+
+		@Override
+		public long skip(long n) throws IOException {
+			// TODO Auto-generated method stub
+			return super.skip(n);
+		}
+
+		@Override
+		public int available() throws IOException {
+
+			// TODO Auto-generated method stub
+			return super.available();
 		}
 
 	}

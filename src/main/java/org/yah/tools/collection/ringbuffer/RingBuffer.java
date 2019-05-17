@@ -3,6 +3,8 @@
  */
 package org.yah.tools.collection.ringbuffer;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.BufferOverflowException;
 
 /**
@@ -82,4 +84,8 @@ public interface RingBuffer {
 	 */
 	int size();
 		
+	InputStream reader();
+	
+	OutputStream writer();
+
 }

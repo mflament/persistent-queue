@@ -99,20 +99,20 @@ public class PersistentQueue<E> implements SimpleQueue<E> {
 
 	private class ReadBuffer extends InputStream {
 
-		private byte[] readBuffer;
+		private byte[] buffer;
 
 		private int readPosition;
 
 		private int size;
 
 		public ReadBuffer(int capacity) {
-			readBuffer = new byte[capacity];
+			buffer = new byte[capacity];
 		}
 
 		@Override
 		public int read() throws IOException {
 			if (readPosition < size)
-				return readBuffer[readPosition++];
+				return buffer[readPosition++];
 			return -1;
 		}
 
@@ -122,7 +122,7 @@ public class PersistentQueue<E> implements SimpleQueue<E> {
 			if (remaining == 0)
 				return 0;
 			len = Math.min(remaining, len);
-			System.arraycopy(readBuffer, readPosition, b, off, len);
+			System.arraycopy(buffer, readPosition, b, off, len);
 			readPosition += len;
 			return len;
 		}
@@ -131,9 +131,9 @@ public class PersistentQueue<E> implements SimpleQueue<E> {
 			int remaining = ringBufer.size() - position;
 			if (remaining < 0)
 				throw new BufferUnderflowException();
-			if (readBuffer.length < length)
-				readBuffer = new byte[(int) (length * 1.5f)];
-			size = ringBufer.read(position, readBuffer, 0, length);
+			if (buffer.length < length)
+				buffer = new byte[(int) (length * 1.5f)];
+			size = ringBufer.read(position, buffer, 0, length);
 			readPosition = 0;
 		}
 
@@ -152,10 +152,10 @@ public class PersistentQueue<E> implements SimpleQueue<E> {
 
 		private int readInt(int position) throws IOException {
 			fill(position, Integer.SIZE);
-			return Byte.toUnsignedInt(readBuffer[0]) << 24 |
-					Byte.toUnsignedInt(readBuffer[1]) << 16 |
-					Byte.toUnsignedInt(readBuffer[2]) << 8 |
-					Byte.toUnsignedInt(readBuffer[3]);
+			return Byte.toUnsignedInt(buffer[0]) << 24 |
+					Byte.toUnsignedInt(buffer[1]) << 16 |
+					Byte.toUnsignedInt(buffer[2]) << 8 |
+					Byte.toUnsignedInt(buffer[3]);
 		}
 	}
 
