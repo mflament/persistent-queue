@@ -1,5 +1,6 @@
 package org.yah.tools.collection.ringbuffer;
 
+import java.io.EOFException;
 import java.io.IOException;
 
 public class BufferedRingBufferInputStream extends RingBufferInputStream {
@@ -27,10 +28,10 @@ public class BufferedRingBufferInputStream extends RingBufferInputStream {
 		}
 
 		int read = length - remaining;
-		RingPosition position = bufferedSnapshot.position.advance(read);
+		RingPosition readPosition = bufferedSnapshot.position.advance(read);
 		if (remaining > buffer.length) {
 			// still more than the buffer capacity, do no use buffer for the rest
-			bufferedSnapshot.read(position.position(), target, offset + read, remaining);
+			bufferedSnapshot.read(readPosition.position(), target, offset + read, remaining);
 			synchronized (ringBuffer()) {
 				// advance the position
 				updateRingPosition(p -> p.advance(length));
@@ -40,10 +41,18 @@ public class BufferedRingBufferInputStream extends RingBufferInputStream {
 			}
 		} else {
 			// buffer all we can
-			// bufferedSnapshot.available() is >= length, so size >= remaining
-			int size = Math.min(bufferedSnapshot.available(), buffer.length);
+			// bufferedSnapshot.available() is >= length, so size will be >= remaining
+			int available = bufferedSnapshot.state.availableToRead(readPosition);
+			int size = Math.min(available, buffer.length);
 			// fill the buffer
-			bufferedSnapshot.read(position.position(), buffer, 0, size);
+			try {
+				bufferedSnapshot.read(readPosition.position(), buffer, 0, size);
+			} catch (EOFException e) {
+				System.out.println("size: " + size);
+				System.out.println("snapshot: " + snapshot);
+				System.out.println("ringBuffer: " + ringBuffer());
+				throw e;
+			}
 
 			// copy part of the buffer to target
 			System.arraycopy(buffer, 0, target, offset + read, remaining);
@@ -52,37 +61,39 @@ public class BufferedRingBufferInputStream extends RingBufferInputStream {
 				// advance the position
 				updateRingPosition(p -> p.advance(length));
 				// update the buffer
-				bufferPosition = position;
+				bufferPosition = readPosition;
 				bufferSize = size;
 			}
 		}
 	}
 
 	@Override
-	protected void capacityUpdated(int newCapacity, State fromState) {
-		synchronized (ringBuffer()) {
-			super.capacityUpdated(newCapacity, fromState);
-			bufferPosition = bufferPosition.updateCapacity(newCapacity, fromState);
-		}
+	protected void updateCapacity(int newCapacity, State fromState) {
+		super.updateCapacity(newCapacity, fromState);
+		bufferPosition = bufferPosition.updateCapacity(newCapacity, fromState);
 	}
 
 	@Override
 	protected ReadSnapshot newSnapshot() {
-		return new BufferedReadSnapshot(this);
+		return new BufferedReadSnapshot();
+	}
+
+	private RingPosition bufferPosition() {
+		return bufferPosition;
 	}
 
 	private class BufferedReadSnapshot extends ReadSnapshot {
 
 		private final RingPosition bufferPosition;
 
-		public BufferedReadSnapshot(BufferedRingBufferInputStream is) {
-			super(is);
-			this.bufferPosition = is.bufferPosition;
+		public BufferedReadSnapshot() {
+			super(BufferedRingBufferInputStream.this);
+			this.bufferPosition = bufferPosition();
 		}
 
-		public int readFromBuffer(byte[] target, int offset, int length) {
+		public final int readFromBuffer(byte[] target, int offset, int length) {
 			int bufferIndex = bufferIndex();
-			int available = bufferSize - bufferIndex;
+			int available = bufferIndex >= 0 ? bufferSize - bufferIndex : 0;
 			if (available > 0) {
 				int count = Math.min(available, length);
 				System.arraycopy(BufferedRingBufferInputStream.this.buffer, bufferIndex, target, offset, count);
@@ -91,10 +102,23 @@ public class BufferedRingBufferInputStream extends RingBufferInputStream {
 			return 0;
 		}
 
-		public int bufferIndex() {
+		private int bufferIndex() {
 			synchronized (ringBuffer()) {
 				return position.substract(bufferPosition);
 			}
 		}
+
+		@Override
+		public String toString() {
+			return String.format("BufferedReadSnapshot [state=%s, position=%s, bufferPosition=%s]",
+					state, position, bufferPosition);
+		}
+
+	}
+
+	public static void main(String[] args) {
+		RingPosition p = new RingPosition(119072, 44, 131072);
+		RingPosition bp = new RingPosition(114984, 44, 131072);
+		System.out.println(p.substract(bp));
 	}
 }

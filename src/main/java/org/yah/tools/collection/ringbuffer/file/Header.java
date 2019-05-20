@@ -7,8 +7,8 @@ import java.nio.channels.FileChannel;
 
 public class Header {
 
-	private static final int POSTION_OFFSET = 1;
-	private static final int SIZE_OFFSET = 2;
+	private static final int POSTION_OFFSET = 0;
+	private static final int SIZE_OFFSET = 1;
 
 	protected static final int LAST_OFFSET = SIZE_OFFSET;
 
@@ -54,7 +54,7 @@ public class Header {
 	}
 
 	public int length() {
-		return 3 * Integer.BYTES;
+		return 2 * Integer.BYTES;
 	}
 
 	@Override

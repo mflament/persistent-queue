@@ -5,7 +5,6 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -20,7 +19,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.yah.tools.collection.ringbuffer.file.FileRingBuffer;
 
 public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
@@ -196,30 +194,26 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 	public void test_concurrent_flood() throws IOException, InterruptedException, NoSuchAlgorithmException {
 		closeBuffer();
 
-		int dataSize = 1024 * 1024;
-		ringBuffer = createRingBuffer(CAPACITY, -1);
+		int messageSize = 36;
+		int messageCount = 5000;
+		int dataSize = messageSize * messageCount;
+
+		ringBuffer = createRingBuffer(CAPACITY, 1024 * 1024);
+
 		MessageDigest digest = MessageDigest.getInstance("SHA-1");
 		byte[] data = data(dataSize);
 		byte[] expectedDigest = digest.digest(data);
 		digest.reset();
 
-		int chunkSize = 113;
-
 		CountDownLatch closeLatch = new CountDownLatch(1);
 		Thread thread = new Thread(() -> {
-			try (RingBufferInputStream is = createReader(64 * 1024)) {
-				int count = 0, remaining = dataSize;
+			try (RingBufferInputStream is = createReader()) {
+				int remaining = messageCount;
 				while (remaining > 0) {
-					int read = is.read();
-					if (read < 0)
-						throw new EOFException();
-					digest.update((byte) read);
-					count++;
+					byte[] msg = RingBufferUtils.readFully(is, messageSize);
+					digest.update(msg);
 					remaining--;
-					if (count > chunkSize) {
-						ringBuffer.remove(chunkSize);
-						count -= chunkSize;
-					}
+					ringBuffer.remove(messageSize);
 				}
 			} catch (RingBufferClosedException e) {
 				// ignore
@@ -231,14 +225,8 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		});
 		thread.start();
 
-		int remaining = data.length;
-		int offset = 0;
-		while (remaining > 0) {
-			int size = chunkSize;
-			size = Math.min(remaining, size);
-			write(data, offset, size);
-			offset += size;
-			remaining -= size;
+		for (int i = 0; i < messageCount; i++) {
+			write(data, i * messageSize, messageSize);
 		}
 
 		closeLatch.await();
@@ -252,12 +240,6 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		return ringBuffer.reader();
 	}
 
-	private RingBufferInputStream createReader(int bufferSize) {
-		if (ringBuffer instanceof FileRingBuffer) {
-			return ((FileRingBuffer) ringBuffer).reader(bufferSize);
-		}
-		return ringBuffer.reader();
-	}
 
 	@Test
 	public void testEnsureCapacity() throws IOException {

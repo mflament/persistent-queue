@@ -5,8 +5,6 @@ import java.io.InputStream;
 import java.util.ConcurrentModificationException;
 import java.util.function.UnaryOperator;
 
-import org.yah.tools.collection.Utils;
-
 public class RingBufferInputStream extends InputStream {
 
 	private final byte[] singleByte = new byte[1];
@@ -37,7 +35,7 @@ public class RingBufferInputStream extends InputStream {
 
 	@Override
 	public int read(byte[] target, int offset, int length) throws IOException {
-		Utils.validateBufferParams(target, offset, length);
+		RingBufferUtils.validateBufferParams(target, offset, length);
 
 		ReadSnapshot snapshot = snapshot();
 		int available = snapshot.available();
@@ -91,8 +89,8 @@ public class RingBufferInputStream extends InputStream {
 		return String.format("RingBufferInputStream[%s]", ringPosition);
 	}
 
-	protected void capacityUpdated(int newCapacity, State fromState) {
-		updateRingPosition(p -> p.updateCapacity(newCapacity, fromState));
+	protected void updateCapacity(int newCapacity, State fromState) {
+		ringPosition = ringPosition.updateCapacity(newCapacity, fromState);
 	}
 
 	protected void updateRingPosition(UnaryOperator<RingPosition> operator) {
@@ -111,7 +109,7 @@ public class RingBufferInputStream extends InputStream {
 
 	protected static class ReadSnapshot {
 
-		protected final LinearBuffer buffer;
+		protected final LinearBuffer linearBuffer;
 
 		protected final State state;
 
@@ -120,19 +118,25 @@ public class RingBufferInputStream extends InputStream {
 		protected ReadSnapshot(RingBufferInputStream is) {
 			this.position = is.ringPosition;
 			this.state = is.ringBuffer.getState();
-			this.buffer = is.ringBuffer.linearBuffer;
+			this.linearBuffer = is.ringBuffer.linearBuffer;
 		}
 
 		public void read(byte[] target, int offset, int length) throws IOException {
-			state.execute(position.position(), length, (p, l, o) -> buffer.read(p, target, offset + o, l));
+			state.execute(position.position(), length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
 		}
 
 		public void read(int position, byte[] target, int offset, int length) throws IOException {
-			state.execute(position, length, (p, l, o) -> buffer.read(p, target, offset + o, l));
+			state.execute(position, length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
 		}
 
 		public int available() {
 			return state.availableToRead(position);
 		}
+
+		@Override
+		public String toString() {
+			return String.format("ReadSnapshot [state=%s, position=%s]", state, position);
+		}
+
 	}
 }

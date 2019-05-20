@@ -11,8 +11,6 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
-import org.yah.tools.collection.Utils;
-
 /**
  * Abstract implementation of {@link RingBuffer}<br/>
  */
@@ -99,7 +97,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	protected final void createBuffer(int capacity) throws IOException {
 		if (limit > 0 && limit < capacity)
 			throw new IllegalArgumentException("capacity " + capacity + " is greater than limit " + limit);
-		this.linearBuffer = allocate(Utils.nextPowerOfTwo(capacity));
+		this.linearBuffer = allocate(RingBufferUtils.nextPowerOfTwo(capacity));
 	}
 
 	protected final void restoreBuffer(LinearBuffer buffer, int startPosition, int size) {
@@ -147,7 +145,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	private State updateBuffer(State currentState, LinearBuffer target, State fromState) {
 		int newCapacity = target.capacity();
 		State newState = currentState.updateCapacity(newCapacity, fromState);
-		inputStreams.forEach(is -> is.capacityUpdated(newCapacity, fromState));
+		inputStreams.forEach(is -> is.updateCapacity(newCapacity, fromState));
 		linearBuffer = target;
 		return newState;
 	}

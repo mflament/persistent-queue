@@ -9,11 +9,11 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
-import org.yah.tools.collection.Utils;
 import org.yah.tools.collection.ringbuffer.AbstractRingBuffer;
 import org.yah.tools.collection.ringbuffer.BufferedRingBufferInputStream;
 import org.yah.tools.collection.ringbuffer.LinearBuffer;
 import org.yah.tools.collection.ringbuffer.RingBufferInputStream;
+import org.yah.tools.collection.ringbuffer.RingBufferUtils;
 import org.yah.tools.collection.ringbuffer.State;
 
 public class FileRingBuffer extends AbstractRingBuffer {
@@ -41,7 +41,7 @@ public class FileRingBuffer extends AbstractRingBuffer {
 	public FileRingBuffer(File file, int capacity, int limit, int defaultReaderCache) throws IOException {
 		super(capacity, limit);
 		this.fileChannel = openChannel(file.toPath());
-		this.capacity = Utils.nextPowerOfTwo(capacity);
+		this.capacity = RingBufferUtils.nextPowerOfTwo(capacity);
 		this.defaultReaderCache = defaultReaderCache;
 
 		this.header = readHeader();
@@ -85,7 +85,6 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 	@Override
 	protected LinearBuffer allocate(int capacity) throws IOException {
-		fileChannel.truncate(headerLength() + capacity);
 		this.capacity = capacity;
 		return linearBuffer;
 	}
@@ -118,7 +117,6 @@ public class FileRingBuffer extends AbstractRingBuffer {
 		Header hdr = newHeader();
 		if (channelSize == 0) {
 			hdr.write(fileChannel);
-			fileChannel.truncate(hdr.length() + capacity);
 		} else {
 			hdr.read(fileChannel);
 			this.capacity = channelSize - hdr.length();
@@ -139,8 +137,13 @@ public class FileRingBuffer extends AbstractRingBuffer {
 			int read = 0;
 			while (dst.hasRemaining()) {
 				int last = fileChannel.read(dst, headerLength() + position + read);
-				if (last < 0)
+				if (last < 0) {
+					System.out.println(String.format(
+							"position: %d, file position: %d, target.length: %d, offset: %d, length: %d, read: %d, dst: %s, file.length: %d",
+							position, headerLength() + position + read, target.length, offset, length, read, dst,
+							fileChannel.size()));
 					throw new EOFException();
+				}
 				read += last;
 			}
 		}
