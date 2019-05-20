@@ -1,5 +1,7 @@
 package org.yah.tools.collection;
 
+import java.util.Objects;
+
 public final class Utils {
 
 	private Utils() {}
@@ -21,5 +23,13 @@ public final class Utils {
 		n++;
 		return n;
 	}
-	
+
+	public static void validateBufferParams(byte[] buffer, int offset, int length) {
+		Objects.requireNonNull(buffer, "buffer is null");
+		if (offset < 0 || offset >= buffer.length)
+			throw new IllegalArgumentException("Invalid offset " + offset);
+		if (length < 0 || offset + length > buffer.length)
+			throw new IllegalArgumentException("Invalid length " + length);
+	}
+
 }

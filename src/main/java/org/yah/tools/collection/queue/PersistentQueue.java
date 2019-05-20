@@ -4,177 +4,176 @@
 package org.yah.tools.collection.queue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.nio.BufferUnderflowException;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.function.Consumer;
 
-import org.yah.tools.collection.ringbuffer.AbstractRingBuffer.State;
-import org.yah.tools.collection.ringbuffer.FileRingBuffer;
+import org.yah.tools.collection.ringbuffer.State;
+import org.yah.tools.collection.ringbuffer.file.FileRingBuffer;
+import org.yah.tools.collection.ringbuffer.file.Header;
 
 /**
  * @author Yah
  * @created 2019/05/10
  */
-public class PersistentQueue<E> implements SimpleQueue<E> {
+public class PersistentQueue<E> implements Closeable {
 
-	private static final int BUFFERS_INITIAL_CAPACITY = 4 * 1024;
+	private static final class PersistentQueueRingBuffer extends FileRingBuffer {
 
-	private final FileRingBuffer ringBufer;
+		public PersistentQueueRingBuffer(File file, int capacity, int limit, int defaultReaderCache)
+				throws IOException {
+			super(file, capacity, limit, defaultReaderCache);
+		}
+
+		public PersistentQueueRingBuffer(File file, int capacity) throws IOException {
+			super(file, capacity);
+		}
+
+		public PersistentQueueRingBuffer(File file) throws IOException {
+			super(file);
+		}
+
+		@Override
+		protected Header newHeader() {
+			return new PersitentQueueHeader();
+		}
+
+		@Override
+		protected void updateHeader(Header header, State state) throws IOException {
+			((PersitentQueueHeader)header).setElementCount(();
+			super.updateHeader(header, state);
+		}
+
+		public void writeElements(byte[] source, int offset, int length, int elementCount) throws IOException {
+			writer().write(b);
+		}
+
+	}
+
+	private static final int DEFAULT_WRITE_BIFFER_SIZE = 1024;
+
+	private final File file;
+
+	private final PersistentQueueRingBuffer ringBufer;
 
 	private final ElementReader<E> elementReader;
 
-	private SizedElement<E> head;
+	private final InputStream liveStream;
 
-	private final ReadBuffer readBuffer;
-
-	private final DirectByteArrayOutputStream writeBuffer;
-
-	public PersistentQueue(ElementReader<E> elementReader, File file) {
-		this.elementReader = elementReader;
-		ringBufer = new FileRingBuffer(file);
-		readBuffer = new ReadBuffer(BUFFERS_INITIAL_CAPACITY);
-		writeBuffer = new DirectByteArrayOutputStream(BUFFERS_INITIAL_CAPACITY);
-		head = readBuffer.readElement(0);
+	public PersistentQueue(ElementReader<E> elementReader, File file) throws IOException {
+		this.elementReader = Objects.requireNonNull(elementReader, "elementReader is null");
+		this.file = Objects.requireNonNull(file, "file is null");
+		this.ringBufer = new PersistentQueueRingBuffer(file);
+		liveStream = ringBufer.reader();
 	}
 
 	@Override
+	public void close() throws IOException {
+		ringBufer.close();
+	}
+
 	public Iterator<E> iterator() {
-		return new PersistentQueueIterator();
+		return new QueueIterator();
 	}
 
-	@Override
 	public void offer(Collection<E> elements) {
 		if (elements.isEmpty())
 			return;
-		synchronized (writeBuffer) {
-			writeBuffer.reset();
-			Iterator<E> iterator = elements.iterator();
-			E newHead = iterator.next();
-			int newHeadSize = writeBuffer.writeElement(newHead);
-			iterator.forEachRemaining(writeBuffer::writeElement);
-			ringBufer.write(writeBuffer.getBuffer(), 0, writeBuffer.size());
-			setHead(new SizedElement<>(newHead, newHeadSize));
+
+		WriteBuffer<E> writeBuffer = newWriteBuffer();
+		elements.forEach(writeBuffer::writeElement);
+		try {
+			ringBufer.writeElements(writeBuffer.buffer(), 0, writeBuffer.size(), elements.size());
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		OutputStream ringWriter = ringBufer.writer();
+		synchronized (ringWriter) {
+			writeBuffer.flush(ringWriter);
 		}
 	}
 
-	@Override
 	public void consume(Consumer<E> consumer) throws InterruptedException {
-		SizedElement<E> e = peekHead();
-		consumer.accept(e.element);
-		ringBufer.remove(Integer.SIZE + e.size);
-		nextHead();
-	}
-
-	private synchronized SizedElement<E> peekHead() throws InterruptedException {
-		while (head == null) {
-			wait();
-		}
-		return head;
-	}
-
-	private synchronized void setHead(SizedElement<E> newHead) {
-		if (head == null) {
-			head = newHead;
-			notifyAll();
+		SizedElement<E> head = readElement(liveStream);
+		consumer.accept(head.element);
+		try {
+			ringBufer.remove(Integer.BYTES + head.size);
+		} catch (IOException ex) {
+			throw new UncheckedIOException(ex);
 		}
 	}
 
-	private synchronized void nextHead() {
-		if (ringBufer.size() > 0) {
-			head = readBuffer.readElement(0);
-		} else {
-			head = null;
-		}
-	}
-
-	@Override
 	public int size() {
 		return ringBufer.size();
 	}
 
-	private class ReadBuffer extends InputStream {
+	private WriteBuffer<E> newWriteBuffer() {
+		return newWriteBuffer(DEFAULT_WRITE_BIFFER_SIZE);
+	}
 
-		private byte[] buffer;
+	private WriteBuffer<E> newWriteBuffer(int size) {
+		return new WriteBuffer<>(elementReader, size);
+	}
 
-		private int readPosition;
-
-		private int size;
-
-		public ReadBuffer(int capacity) {
-			buffer = new byte[capacity];
-		}
-
-		@Override
-		public int read() throws IOException {
-			if (readPosition < size)
-				return buffer[readPosition++];
-			return -1;
-		}
-
-		@Override
-		public int read(byte[] b, int off, int len) throws IOException {
-			int remaining = size - readPosition;
-			if (remaining == 0)
-				return 0;
-			len = Math.min(remaining, len);
-			System.arraycopy(buffer, readPosition, b, off, len);
-			readPosition += len;
-			return len;
-		}
-
-		private void fill(int position, int length) {
-			int remaining = ringBufer.size() - position;
-			if (remaining < 0)
-				throw new BufferUnderflowException();
-			if (buffer.length < length)
-				buffer = new byte[(int) (length * 1.5f)];
-			size = ringBufer.read(position, buffer, 0, length);
-			readPosition = 0;
-		}
-
-		public SizedElement<E> readElement(int position) {
-			if (ringBufer.size() == 0)
-				return null;
-
-			try {
-				int size = readInt(position);
-				fill(position + Integer.SIZE, size);
-				return new SizedElement<>(elementReader.read(this), size);
-			} catch (IOException e) {
-				throw new UncheckedIOException(e);
-			}
-		}
-
-		private int readInt(int position) throws IOException {
-			fill(position, Integer.SIZE);
-			return Byte.toUnsignedInt(buffer[0]) << 24 |
-					Byte.toUnsignedInt(buffer[1]) << 16 |
-					Byte.toUnsignedInt(buffer[2]) << 8 |
-					Byte.toUnsignedInt(buffer[3]);
+	private SizedElement<E> readElement(InputStream is) {
+		try {
+			int size = readInt(is);
+			E element = elementReader.read(is);
+			return new SizedElement<E>(element, size);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
 		}
 	}
 
-	private class DirectByteArrayOutputStream extends ByteArrayOutputStream {
+	private int readInt(InputStream is) throws IOException {
+		int res = is.read() << 24;
+		res |= is.read() << 16;
+		res |= is.read() << 8;
+		res |= is.read();
+		return res;
+	}
 
-		public DirectByteArrayOutputStream() {
-			super();
-		}
+	private static class WriteBuffer<E> extends ByteArrayOutputStream {
 
-		public DirectByteArrayOutputStream(int size) {
+		private final ElementReader<E> elementReader;
+
+		private int elementCount;
+
+		public WriteBuffer(ElementReader<E> elementReader, int size) {
 			super(size);
+			this.elementReader = elementReader;
 		}
 
-		public final byte[] getBuffer() {
+		public byte[] buffer() {
 			return buf;
 		}
 
+		@Override
+		public synchronized void reset() {
+			super.reset();
+			elementCount = 0;
+		}
+
+		public void flush(OutputStream writer) {
+			try {
+				writer.write(buf, 0, size());
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+			reset();
+		}
+
 		public final int writeElement(E element) {
-			skip(Integer.SIZE);
+			skip(Integer.BYTES);
 			int position = size();
 			try {
 				elementReader.write(element, this);
@@ -182,7 +181,8 @@ public class PersistentQueue<E> implements SimpleQueue<E> {
 				throw new UncheckedIOException(e);
 			}
 			int elementSize = size() - position;
-			writeInt(position - Integer.SIZE, elementSize);
+			writeInt(position - Integer.BYTES, elementSize);
+			elementCount++;
 			return elementSize;
 		}
 
@@ -211,30 +211,29 @@ public class PersistentQueue<E> implements SimpleQueue<E> {
 		}
 	}
 
-	private final class PersistentQueueIterator implements Iterator<E> {
+	private final class QueueIterator implements Iterator<E> {
 
-		private final ReadBuffer readBuffer;
+		private final InputStream is;
 
-		private State ringState;
-
-		private int position;
-
-		public PersistentQueueIterator() {
-			readBuffer = new ReadBuffer(BUFFERS_INITIAL_CAPACITY);
-			ringState = ringBufer.getState();
+		public QueueIterator() {
+			is = ringBufer.reader();
 		}
 
 		@Override
 		public boolean hasNext() {
-			// TODO Auto-generated method stub
-			return false;
+			try {
+				return is.available() > 0;
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
 		}
 
 		@Override
 		public E next() {
-			// TODO Auto-generated method stub
-			return null;
+			if (!hasNext())
+				throw new NoSuchElementException();
+			return readElement(is).element;
 		}
-
 	}
+
 }

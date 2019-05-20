@@ -1,15 +1,23 @@
-package org.yah.tools.collection.ringbuffer;
+package org.yah.tools.collection.ringbuffer.array;
 
-import org.yah.tools.collection.ringbuffer.AbstractRingBuffer.LinearBuffer;
-import org.yah.tools.collection.ringbuffer.ArrayRingBuffer.ArrayLinearBuffer;
+import java.io.IOException;
+
+import org.yah.tools.collection.ringbuffer.AbstractRingBuffer;
+import org.yah.tools.collection.ringbuffer.LinearBuffer;
+import org.yah.tools.collection.ringbuffer.RingBuffer;
 
 /**
  * In memory with byte[] implementation of {@link RingBuffer}
  */
-public class ArrayRingBuffer extends AbstractRingBuffer<ArrayLinearBuffer> {
+public class ArrayRingBuffer extends AbstractRingBuffer {
 
-	public ArrayRingBuffer(int capacity) {
-		super(capacity);
+	public ArrayRingBuffer(int capacity) throws IOException {
+		this(capacity, -1);
+	}
+
+	public ArrayRingBuffer(int capacity, int limit) throws IOException {
+		super(capacity, limit);
+		createBuffer(capacity);
 	}
 
 	@Override
