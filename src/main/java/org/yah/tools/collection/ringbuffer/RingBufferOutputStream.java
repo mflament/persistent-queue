@@ -3,6 +3,12 @@ package org.yah.tools.collection.ringbuffer;
 import java.io.IOException;
 import java.io.OutputStream;
 
+<<<<<<< HEAD
+=======
+import org.yah.tools.collection.Utils;
+
+
+>>>>>>> 586d0547981f841f0044831a8c26398c7b25ddb4
 public class RingBufferOutputStream extends OutputStream {
 
 	private final AbstractRingBuffer ringBuffer;
@@ -24,10 +30,7 @@ public class RingBufferOutputStream extends OutputStream {
 		synchronized (ringBuffer.writeMonitor) {
 			State state = ensureCapacity(length);
 			int writePosition = state.writePosition();
-			state.execute(writePosition, length, (p, l, o) -> {
-				ringBuffer.linearBuffer.write(p, source, offset + o, l);
-			});
-			
+			state.execute(writePosition, length, (p, l, o) -> ringBuffer.linearBuffer.write(p, source, offset + o, l));
 			ringBuffer.updateState(s -> s.incrementSize(length));
 		}
 	}
@@ -52,9 +55,8 @@ public class RingBufferOutputStream extends OutputStream {
 			if (ringBuffer.inLimit(newCapacity)) {
 				LinearBuffer newBuffer = ringBuffer.allocate(newCapacity);
 				return ringBuffer.transferTo(newBuffer, state);
-			} else {
-				return ringBuffer.waitFor(ringBuffer::getState, s -> s.availableToWrite() >= additional);
 			}
+			return ringBuffer.waitFor(ringBuffer::getState, s -> s.availableToWrite() >= additional);
 		}
 		return state;
 	}

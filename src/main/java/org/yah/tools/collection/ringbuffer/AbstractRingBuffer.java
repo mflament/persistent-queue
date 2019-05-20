@@ -26,7 +26,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 
 	protected final Object writeMonitor = new Object();
 
-	protected AbstractRingBuffer(int capacity, int limit) throws IOException {
+	protected AbstractRingBuffer(int capacity, int limit) {
 		this.limit = limit;
 		this.state = new State(capacity);
 	}
@@ -158,6 +158,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 			try {
 				wait();
 			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
 				throw new InterruptedIOException();
 			}
 			last = contextSupplier.get();
