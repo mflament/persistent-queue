@@ -48,12 +48,12 @@ public class PersistentQueue<E> implements Closeable {
 
 		@Override
 		protected void updateHeader(Header header, State state) throws IOException {
-			((PersitentQueueHeader)header).setElementCount(();
+			//((PersitentQueueHeader)header).setElementCount(();
 			super.updateHeader(header, state);
 		}
 
 		public void writeElements(byte[] source, int offset, int length, int elementCount) throws IOException {
-			writer().write(b);
+			//writer().write(b);
 		}
 
 	}
