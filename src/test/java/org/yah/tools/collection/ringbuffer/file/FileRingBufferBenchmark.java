@@ -103,7 +103,7 @@ public class FileRingBufferBenchmark {
 		FileRingBufferBenchmark benchmark = new FileRingBufferBenchmark();
 		int capacity = 1024 * 1024;
 		try (FileRingBuffer buffer = benchmark.newEmptyRingBuffer(capacity, -1, 128 * 1024)) {
-			benchmark.benchmark(buffer, 5 * 1024 * 1024, 2 * 1024);
+			benchmark.benchmark(buffer, 512 * 1024, 64);
 		}
 	}
 }

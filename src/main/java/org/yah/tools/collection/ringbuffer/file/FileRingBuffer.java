@@ -79,8 +79,8 @@ public class FileRingBuffer extends AbstractRingBuffer {
 	private FileChannel openChannel(Path path) throws IOException {
 		FileChannel channel = null;
 		try {
-			return FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.SYNC,
-					StandardOpenOption.READ, StandardOpenOption.WRITE);
+			return FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE,
+					StandardOpenOption.SYNC);
 		} catch (IOException e) {
 			RingBufferUtils.closeQuietly(channel);
 			throw e;
@@ -124,6 +124,12 @@ public class FileRingBuffer extends AbstractRingBuffer {
 		intBuffer.put(state.size());
 		intBuffer.put(state.position().capacity());
 	}
+
+//	@Override
+//	protected void write(byte[] source, int offset, int length) throws IOException {
+//		super.write(source, offset, length);
+//		fileChannel.force(true);
+//	}
 
 	protected int headerLength() {
 		return Integer.BYTES * 3;
