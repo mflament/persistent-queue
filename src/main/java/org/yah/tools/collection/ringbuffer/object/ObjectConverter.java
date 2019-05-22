@@ -1,10 +1,10 @@
-package org.yah.tools.collection.queue;
+package org.yah.tools.collection.ringbuffer.object;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
-public interface ElementReader<E> {
+public interface ObjectConverter<E> {
 
 	E read(InputStream inputStream) throws IOException;
 

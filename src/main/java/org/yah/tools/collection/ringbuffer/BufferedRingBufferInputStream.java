@@ -68,14 +68,17 @@ public class BufferedRingBufferInputStream extends RingBufferInputStream {
 	}
 
 	@Override
-	protected void updateCapacity(int newCapacity, State fromState) {
+	protected void updateCapacity(int newCapacity, RingBufferState fromState) {
 		super.updateCapacity(newCapacity, fromState);
 		bufferPosition = bufferPosition.updateCapacity(newCapacity, fromState);
 	}
 
 	@Override
 	protected ReadSnapshot newSnapshot() {
-		return new BufferedReadSnapshot();
+		AbstractRingBuffer ringBuffer = ringBuffer();
+		synchronized (ringBuffer) {
+			return new BufferedReadSnapshot(ringBuffer.linearBuffer(), ringBuffer.state(), ringPosition());
+		}
 	}
 
 	private RingPosition bufferPosition() {
@@ -86,8 +89,8 @@ public class BufferedRingBufferInputStream extends RingBufferInputStream {
 
 		private final RingPosition bufferPosition;
 
-		public BufferedReadSnapshot() {
-			super(BufferedRingBufferInputStream.this);
+		public BufferedReadSnapshot(LinearBuffer linearBuffer, RingBufferState state, RingPosition position) {
+			super(linearBuffer, state, position);
 			this.bufferPosition = bufferPosition();
 		}
 

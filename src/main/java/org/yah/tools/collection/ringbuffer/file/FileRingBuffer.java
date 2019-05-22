@@ -1,10 +1,10 @@
 package org.yah.tools.collection.ringbuffer.file;
 
-import java.io.Closeable;
 import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -13,8 +13,8 @@ import org.yah.tools.collection.ringbuffer.AbstractRingBuffer;
 import org.yah.tools.collection.ringbuffer.BufferedRingBufferInputStream;
 import org.yah.tools.collection.ringbuffer.LinearBuffer;
 import org.yah.tools.collection.ringbuffer.RingBufferInputStream;
+import org.yah.tools.collection.ringbuffer.RingBufferState;
 import org.yah.tools.collection.ringbuffer.RingBufferUtils;
-import org.yah.tools.collection.ringbuffer.State;
 
 public class FileRingBuffer extends AbstractRingBuffer {
 
@@ -26,9 +26,7 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 	private final FileChannel fileChannel;
 
-	private int capacity;
-
-	private final Header header;
+	private final ByteBuffer headerBuffer;
 
 	public FileRingBuffer(File file) throws IOException {
 		this(file, DEFAULT_CAPACITY, -1, DEFAULT_READER_CACHE);
@@ -39,18 +37,14 @@ public class FileRingBuffer extends AbstractRingBuffer {
 	}
 
 	public FileRingBuffer(File file, int capacity, int limit, int defaultReaderCache) throws IOException {
-		super(capacity, limit);
+		super(limit);
 		this.fileChannel = openChannel(file.toPath());
-		this.capacity = RingBufferUtils.nextPowerOfTwo(capacity);
 		this.defaultReaderCache = defaultReaderCache;
-
-		this.header = readHeader();
-		FileLinearBuffer buffer = new FileLinearBuffer();
-		restoreBuffer(buffer, header.getStartPosition(), header.getSize());
-	}
-
-	protected Header newHeader() {
-		return new Header();
+		this.headerBuffer = ByteBuffer.allocate(headerLength());
+		RingBufferState state = readHeader(capacity);
+		LinearBuffer linearBuffer = new FileLinearBuffer(state.capacity());
+		// TODO : shrink to min(state.size, capacity) if capacity < state.capacity
+		restore(state, linearBuffer);
 	}
 
 	@Override
@@ -67,14 +61,8 @@ public class FileRingBuffer extends AbstractRingBuffer {
 	}
 
 	@Override
-	protected void onChange(State state) throws IOException {
-		updateHeader(header, state);
-	}
-
-	protected void updateHeader(Header header, State state) throws IOException {
-		header.setStartPosition(state.position());
-		header.setSize(state.size());
-		header.write(fileChannel);
+	protected final void onStateChange(RingBufferState state) throws IOException {
+		writeHeader(state);
 	}
 
 	@Override
@@ -85,12 +73,7 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 	@Override
 	protected LinearBuffer allocate(int capacity) throws IOException {
-		this.capacity = capacity;
-		return linearBuffer;
-	}
-
-	private int headerLength() {
-		return header.length();
+		return new FileLinearBuffer(capacity);
 	}
 
 	private FileChannel openChannel(Path path) throws IOException {
@@ -99,32 +82,60 @@ public class FileRingBuffer extends AbstractRingBuffer {
 			return FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.SYNC,
 					StandardOpenOption.READ, StandardOpenOption.WRITE);
 		} catch (IOException e) {
-			closeQuietly(channel);
+			RingBufferUtils.closeQuietly(channel);
 			throw e;
 		}
 	}
 
-	private void closeQuietly(Closeable closeable) {
-		if (closeable != null) {
-			try {
-				closeable.close();
-			} catch (IOException e2) {}
+	private RingBufferState readHeader(int capacity) throws IOException {
+		int channelSize = (int) fileChannel.size();
+		if (channelSize == 0) {
+			RingBufferState res = newState(capacity);
+			writeHeader(res);
+			return res;
+		} else {
+			return readHeader();
 		}
 	}
 
-	private Header readHeader() throws IOException {
-		int channelSize = (int) fileChannel.size();
-		Header hdr = newHeader();
-		if (channelSize == 0) {
-			hdr.write(fileChannel);
-		} else {
-			hdr.read(fileChannel);
-			this.capacity = channelSize - hdr.length();
-		}
-		return hdr;
+	private RingBufferState readHeader() throws IOException {
+		headerBuffer.position(0);
+		fileChannel.read(headerBuffer, 0);
+		headerBuffer.flip();
+		return readHeader(headerBuffer.asIntBuffer());
+	}
+
+	protected RingBufferState readHeader(IntBuffer intBuffer) throws IOException {
+		int pos = intBuffer.get();
+		int size = intBuffer.get();
+		int capacity = intBuffer.get();
+		return new RingBufferState(pos, 0, capacity, size);
+	}
+
+	private void writeHeader(RingBufferState state) throws IOException {
+		IntBuffer intBuffer = headerBuffer.asIntBuffer();
+		writeHeader(state, intBuffer);
+		fileChannel.write(headerBuffer, 0);
+		headerBuffer.flip();
+	}
+
+	protected void writeHeader(RingBufferState state, IntBuffer intBuffer) throws IOException {
+		intBuffer.put(state.position().position());
+		intBuffer.put(state.size());
+		intBuffer.put(state.position().capacity());
+	}
+
+	protected int headerLength() {
+		return Integer.BYTES * 3;
 	}
 
 	public class FileLinearBuffer implements LinearBuffer {
+
+		private int capacity;
+
+		public FileLinearBuffer(int capacity) {
+			this.capacity = RingBufferUtils.nextPowerOfTwo(capacity);
+		}
 
 		@Override
 		public int capacity() {
@@ -137,13 +148,8 @@ public class FileRingBuffer extends AbstractRingBuffer {
 			int read = 0;
 			while (dst.hasRemaining()) {
 				int last = fileChannel.read(dst, headerLength() + position + read);
-				if (last < 0) {
-					System.out.println(String.format(
-							"position: %d, file position: %d, target.length: %d, offset: %d, length: %d, read: %d, dst: %s, file.length: %d",
-							position, headerLength() + position + read, target.length, offset, length, read, dst,
-							fileChannel.size()));
+				if (last < 0)
 					throw new EOFException();
-				}
 				read += last;
 			}
 		}
@@ -159,9 +165,6 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 		@Override
 		public void copyTo(LinearBuffer target, int position, int targetPosition, int length) throws IOException {
-			if (target != this)
-				throw new IllegalStateException("different target");
-
 			if (position == targetPosition)
 				return;
 

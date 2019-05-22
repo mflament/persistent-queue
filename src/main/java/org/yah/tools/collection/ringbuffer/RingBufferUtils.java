@@ -1,5 +1,6 @@
 package org.yah.tools.collection.ringbuffer;
 
+import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,6 +51,16 @@ public final class RingBufferUtils {
 				throw new EOFException();
 			read += c;
 			remaining -= c;
+		}
+	}
+
+	public static void closeQuietly(Closeable closeable		) {
+		if (closeable == null)
+			return;
+		try {
+			closeable.close();
+		} catch (IOException e) {
+			// shhhh
 		}
 	}
 

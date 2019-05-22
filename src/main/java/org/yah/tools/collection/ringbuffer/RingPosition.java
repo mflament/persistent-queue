@@ -5,12 +5,12 @@ import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class RingPosition {
+public final class RingPosition {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(RingPosition.class);
 
 	@FunctionalInterface
-	protected interface RingAction {
+	public interface RingAction {
 		void apply(int position, int length, int offset) throws IOException;
 	}
 
@@ -18,39 +18,39 @@ public class RingPosition {
 		return position & (capacity - 1);
 	}
 
-	protected final int position;
+	private final int position;
 
-	protected final int cycle;
+	private final long cycle;
 
-	protected final int capacity;
+	private final int capacity;
 
 	public RingPosition(RingPosition from) {
 		this(from.position, from.cycle, from.capacity);
 	}
 
-	public RingPosition(int position, int cycle, int capacity) {
+	public RingPosition(int position, long cycle, int capacity) {
 		this.position = position;
 		this.cycle = cycle;
 		this.capacity = capacity;
 	}
 
-	public final int position() {
+	public int position() {
 		return position;
 	}
 
-	public final int cycle() {
+	public long cycle() {
 		return cycle;
 	}
 
-	public final int capacity() {
+	public int capacity() {
 		return capacity;
 	}
 
-	public final int wrap(int position) {
+	public int wrap(int position) {
 		return wrap(position, capacity);
 	}
 
-	public final int substract(RingPosition other) {
+	public int substract(RingPosition other) {
 		if (other.cycle == cycle) {
 			return position - other.position;
 		} else if (other.cycle > cycle) {
@@ -59,7 +59,7 @@ public class RingPosition {
 
 			// and full cycles until other
 			// assume capacity was constant if more than one cycle
-			int fullCycles = other.cycle - cycle - 1;
+			long fullCycles = other.cycle - cycle - 1;
 			if (fullCycles > 1 && capacity != other.capacity) {
 				LOGGER.warn("{} cycles between {} and {}, distance will be wrong");
 			}
@@ -73,7 +73,7 @@ public class RingPosition {
 			int before = other.capacity - other.position;
 
 			// and full cycles until me
-			int fullCycles = cycle - other.cycle - 1;
+			long fullCycles = cycle - other.cycle - 1;
 			if (fullCycles > 1 && capacity != other.capacity) {
 				LOGGER.warn("{} cycles between {} and {}, distance will be wrong");
 			}
@@ -85,7 +85,7 @@ public class RingPosition {
 		}
 	}
 
-	protected final boolean after(RingPosition other) {
+	public boolean after(RingPosition other) {
 		return cycle > other.cycle || (cycle == other.cycle && position > other.position);
 	}
 
@@ -94,24 +94,34 @@ public class RingPosition {
 		return String.format("RingPosition [position=%s, cycle=%s, capacity=%s]", position, cycle, capacity);
 	}
 
-	protected RingPosition advance(int length) {
+	public RingPosition advance(int length) {
 		int nextPos = wrap(position + length);
-		int nextCycle = cycle;
-		if (nextPos < position)
+		long nextCycle = cycle;
+
+		if (nextPos < position) {
 			nextCycle++;
+			if (nextCycle < 0) {
+				throw new IllegalStateException("cycle overflow: " + this);
+			}
+		}
 		return new RingPosition(nextPos, nextCycle, capacity);
 	}
 
-	protected RingPosition updateCapacity(int newCapacity, State fromState) {
-		int offset = 0;
-		if (fromState.wrapped() && position < fromState.writePosition()) {
-			offset = fromState.capacity;
-		}
-		int cycleOffset = offset > 0 ? -1 : 0;
-		return new RingPosition(position + offset, cycle + cycleOffset, newCapacity);
+	public RingPosition withCapacity(int newCapacity) {
+		return new RingPosition(position, cycle, newCapacity);
 	}
 
-	protected void execute(int position, int length, RingAction action) throws IOException {
+	public RingPosition updateCapacity(int newCapacity, RingBufferState fromState) {
+		int offset = 0;
+		long nextCycle = cycle;
+		if (fromState.wrapped() && position < fromState.writePosition()) {
+			offset = fromState.capacity();
+			nextCycle--;
+		}
+		return new RingPosition(position + offset, nextCycle, newCapacity);
+	}
+
+	public void execute(int position, int length, RingAction action) throws IOException {
 		if (length > capacity)
 			throw new IllegalArgumentException("Invalid length " + length + ", current capacity " + capacity);
 		if (length < 0)

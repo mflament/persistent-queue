@@ -21,38 +21,12 @@ public class RingBufferOutputStream extends OutputStream {
 		if (length == 0)
 			return;
 		RingBufferUtils.validateBufferParams(source, offset, length);
-		synchronized (ringBuffer.writeMonitor) {
-			State state = ensureCapacity(length);
-			int writePosition = state.writePosition();
-			state.execute(writePosition, length, (p, l, o) -> ringBuffer.linearBuffer.write(p, source, offset + o, l));
-			ringBuffer.updateState(s -> s.incrementSize(length));
-		}
+		ringBuffer.write(source, offset, length);
 	}
 
 	@Override
 	public void close() throws IOException {
 		throw new UnsupportedOperationException();
-	}
-
-	private State ensureCapacity(int additional) throws IOException {
-		// work with a state snapshot, it can change in time as follow:
-		// - no other writer, so no other capacity change
-		// - only concurrent read or remove:
-		// - size can only grow
-		// - write position will never change
-		State state = ringBuffer.getState();
-		int capacity = state.capacity();
-		int available = state.availableToWrite();
-		if (available < additional) {
-			int missing = additional - available;
-			int newCapacity = RingBufferUtils.nextPowerOfTwo(capacity + missing);
-			if (ringBuffer.inLimit(newCapacity)) {
-				LinearBuffer newBuffer = ringBuffer.allocate(newCapacity);
-				return ringBuffer.transferTo(newBuffer, state);
-			}
-			return ringBuffer.waitFor(ringBuffer::getState, s -> s.availableToWrite() >= additional);
-		}
-		return state;
 	}
 
 }

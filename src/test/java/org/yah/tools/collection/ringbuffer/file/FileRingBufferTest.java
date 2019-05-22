@@ -41,7 +41,7 @@ public class FileRingBufferTest extends AbstractRingBufferTest<FileRingBuffer> {
 
 		reloadRingBuffer();
 		assertEquals(CAPACITY / 2, ringBuffer.size());
-		assertEquals(CAPACITY / 2, ringBuffer.getState().position());
+		assertStatePosition(CAPACITY / 2);
 
 		byte[] actual = new byte[CAPACITY / 2];
 		int read = read(actual);
@@ -50,12 +50,16 @@ public class FileRingBufferTest extends AbstractRingBufferTest<FileRingBuffer> {
 
 		ringBuffer.remove(CAPACITY / 2);
 		assertEquals(0, ringBuffer.size());
-		assertEquals(0, ringBuffer.getState().position());
-		assertEquals(1, ringBuffer.getState().cycle());
+		assertStatePosition(0);
+		assertEquals(1, ringBuffer.state().cycle());
 
 		reloadRingBuffer();
 		assertEquals(0, ringBuffer.size());
-		assertEquals(0, ringBuffer.getState().position());
-		assertEquals(0, ringBuffer.getState().cycle());
+		assertStatePosition(0);
+		assertEquals(0, ringBuffer.state().cycle());
+	}
+
+	private void assertStatePosition(int expected) {
+		assertEquals(expected, ringBuffer.state().position().position());
 	}
 }

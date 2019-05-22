@@ -43,7 +43,7 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
 	@Test
 	public void testWrap() {
-		State state = ringBuffer.getState();
+		RingBufferState state = ringBuffer.state();
 		assertEquals(state.wrap(0), 0);
 		assertEquals(state.wrap(1), 1);
 		assertEquals(state.wrap(CAPACITY), 0);

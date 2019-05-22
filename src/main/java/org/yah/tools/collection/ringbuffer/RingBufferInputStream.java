@@ -17,9 +17,12 @@ public class RingBufferInputStream extends InputStream {
 
 	public RingBufferInputStream(AbstractRingBuffer ringBuffer) {
 		this.ringBuffer = ringBuffer;
-		this.ringPosition = new RingPosition(ringBuffer.getState());
+		this.ringPosition = ringBuffer.state().position();
 	}
 
+	/**
+	 * TODO : add timeout
+	 */
 	@Override
 	public int read() throws IOException {
 		ReadSnapshot snapshot = ringBuffer.waitFor(this::newSnapshot, c -> closed || c.available() != 0);
@@ -89,7 +92,7 @@ public class RingBufferInputStream extends InputStream {
 		return String.format("RingBufferInputStream[%s]", ringPosition);
 	}
 
-	protected void updateCapacity(int newCapacity, State fromState) {
+	protected void updateCapacity(int newCapacity, RingBufferState fromState) {
 		ringPosition = ringPosition.updateCapacity(newCapacity, fromState);
 	}
 
@@ -104,28 +107,30 @@ public class RingBufferInputStream extends InputStream {
 	}
 
 	protected ReadSnapshot newSnapshot() {
-		return new ReadSnapshot(this);
+		synchronized (ringBuffer) {
+			return new ReadSnapshot(ringBuffer.linearBuffer(), ringBuffer.state(), ringPosition);
+		}
 	}
 
 	protected static class ReadSnapshot {
 
 		protected final LinearBuffer linearBuffer;
 
-		protected final State state;
+		protected final RingBufferState state;
 
 		protected final RingPosition position;
 
-		protected ReadSnapshot(RingBufferInputStream is) {
-			this.position = is.ringPosition;
-			this.state = is.ringBuffer.getState();
-			this.linearBuffer = is.ringBuffer.linearBuffer;
+		protected ReadSnapshot(LinearBuffer linearBuffer, RingBufferState state, RingPosition position) {
+			this.linearBuffer = linearBuffer;
+			this.state = state;
+			this.position = position;
 		}
 
-		public void read(byte[] target, int offset, int length) throws IOException {
+		protected void read(byte[] target, int offset, int length) throws IOException {
 			state.execute(position.position(), length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
 		}
 
-		public void read(int position, byte[] target, int offset, int length) throws IOException {
+		protected void read(int position, byte[] target, int offset, int length) throws IOException {
 			state.execute(position, length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
 		}
 
