@@ -16,6 +16,8 @@ public class ObjectRingBufferTest {
 
 	private ObjectRingBuffer<String> createBuffer(boolean delete) throws IOException {
 		File file = new File("target/test/ring-buffers/object-buffer.dat");
+		if (!file.getParentFile().exists() && !file.getParentFile().mkdirs())
+			throw new IOException("Unable to create directory " + file.getParentFile());
 		if (delete && file.exists())
 			file.delete();
 		return ObjectRingBuffer.<String>builder()
