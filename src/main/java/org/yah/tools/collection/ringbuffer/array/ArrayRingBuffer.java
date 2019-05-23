@@ -5,6 +5,7 @@ import java.io.IOException;
 import org.yah.tools.collection.ringbuffer.AbstractRingBuffer;
 import org.yah.tools.collection.ringbuffer.LinearBuffer;
 import org.yah.tools.collection.ringbuffer.RingBuffer;
+import org.yah.tools.collection.ringbuffer.StateManager;
 
 /**
  * In memory with byte[] implementation of {@link RingBuffer}
@@ -16,7 +17,7 @@ public class ArrayRingBuffer extends AbstractRingBuffer {
 	}
 
 	public ArrayRingBuffer(int capacity, int limit) throws IOException {
-		super(capacity, limit);
+		super(new StateManager() {}, capacity, limit);
 		createBuffer(capacity);
 	}
 

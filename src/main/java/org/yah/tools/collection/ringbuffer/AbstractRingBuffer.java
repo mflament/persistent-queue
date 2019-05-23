@@ -24,15 +24,23 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 
 	private final List<RingBufferInputStream> inputStreams = new ArrayList<>();
 
+	private final StateManager stateManager;
+
 	private final Object writeMonitor = new Object();
 
-	protected AbstractRingBuffer(int limit) {
+	protected AbstractRingBuffer( int limit) {
 		this.limit = limit;
+		this.stateManager = newStateManager();
 	}
 
-	protected AbstractRingBuffer(int capacity, int limit) {
+	protected AbstractRingBuffer(int capacity, int limit) throws IOException {
 		this.limit = limit;
-		this.state = newState(capacity);
+		this.stateManager = newStateManager();
+		this.state = stateManager.read(capacity);
+	}
+
+	protected StateManager newStateManager() {
+		return new StateManager() {};
 	}
 
 	protected abstract LinearBuffer allocate(int capacity) throws IOException;
@@ -40,6 +48,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	protected void onStateChange(RingBufferState state) throws IOException {}
 
 	protected RingBufferState newState(int capacity) {
+
 		return new RingBufferState(0, 0, capacity, 0);
 	}
 
@@ -143,7 +152,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	protected final synchronized RingBufferState updateState(UnaryOperator<RingBufferState> operator)
 			throws IOException {
 		state = operator.apply(state);
-		onStateChange(state);
+		stateManager.write(state);
 		notifyAll();
 		return state;
 	}

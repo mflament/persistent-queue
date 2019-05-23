@@ -16,9 +16,12 @@ import java.util.Objects;
 import org.yah.tools.collection.ringbuffer.RingBufferInputStream;
 import org.yah.tools.collection.ringbuffer.RingBufferState;
 import org.yah.tools.collection.ringbuffer.file.FileRingBuffer;
+import org.yah.tools.collection.ringbuffer.file.FileRingBuffer.Builder;
 import org.yah.tools.collection.ringbuffer.object.converters.SerializableConverter;
 
-public final class ObjectRingBuffer<E> extends FileRingBuffer implements Iterable<E> {
+public final class ObjectRingBuffer<E> implements Iterable<E> {
+
+	private final FileRingBuffer fileBuffer;
 
 	private final ObjectConverter<E> converter;
 
@@ -26,16 +29,16 @@ public final class ObjectRingBuffer<E> extends FileRingBuffer implements Iterabl
 
 	private final CappedInputStream cappedInputStream;
 
-	private int lastElementSize;
+	private final int writeBufferSize;
 
-	private int writeBufferSize;
+	private int lastElementSize;
 
 	private ObjectRingBuffer(Builder<E> builder)
 			throws IOException {
-		super(builder.file, builder.capacity, builder.limit, builder.readerCacheSize);
+		this.fileBuffer = builder.fileBuffer;
 		this.converter = builder.converter;
 		this.writeBufferSize = builder.writeBufferSize;
-		this.elementInputStream = reader();
+		this.elementInputStream = fileBuffer.reader();
 		this.cappedInputStream = new CappedInputStream(elementInputStream);
 	}
 
@@ -62,7 +65,7 @@ public final class ObjectRingBuffer<E> extends FileRingBuffer implements Iterabl
 
 	@Override
 	protected void writeHeader(RingBufferState state, IntBuffer intBuffer) throws IOException {
-		super.writeHeader(state, intBuffer);
+		super.write(state, intBuffer);
 		intBuffer.put(((ObjectRingBufferState) state).elements());
 	}
 
@@ -184,7 +187,7 @@ public final class ObjectRingBuffer<E> extends FileRingBuffer implements Iterabl
 
 		private final CappedInputStream is;
 
-		public QueueIterator()  {
+		public QueueIterator() {
 			RingBufferInputStream reader = reader();
 			is = new CappedInputStream(reader);
 		}
@@ -216,17 +219,11 @@ public final class ObjectRingBuffer<E> extends FileRingBuffer implements Iterabl
 		}
 	}
 
-	public static final class Builder<E> {
+	public static final class Builder<E> extends FileRingBuffer.Builder {
+
+		public FileRingBuffer fileBuffer;
 
 		private final ObjectConverter<E> converter;
-
-		private File file = new File("queue.dat");
-
-		private int capacity = 128 * 1024;
-
-		private int limit = 5 * 1024 * 1024;
-
-		private int readerCacheSize = 8 * 1024;
 
 		private int writeBufferSize = 8 * 1024;
 
@@ -234,23 +231,33 @@ public final class ObjectRingBuffer<E> extends FileRingBuffer implements Iterabl
 			this.converter = Objects.requireNonNull(converter, "converter is null");
 		}
 
+		@Override
 		public Builder<E> withFile(File file) {
-			this.file = file;
-			return this;
+			// TODO Auto-generated method stub
+			return super.withFile(file);
 		}
 
+		@Override
 		public Builder<E> withCapacity(int capacity) {
-			this.capacity = capacity;
-			return this;
+			// TODO Auto-generated method stub
+			return super.withCapacity(capacity);
 		}
 
+		@Override
 		public Builder<E> withLimit(int limit) {
-			this.limit = limit;
-			return this;
+			// TODO Auto-generated method stub
+			return super.withLimit(limit);
 		}
 
+		@Override
 		public Builder<E> withDefaultReaderCache(int defaultReaderCache) {
-			this.readerCacheSize = defaultReaderCache;
+			// TODO Auto-generated method stub
+			return super.withDefaultReaderCache(defaultReaderCache);
+		}
+
+		@Override
+		public Builder<E> sync() {
+			super.sync();
 			return this;
 		}
 
@@ -259,6 +266,7 @@ public final class ObjectRingBuffer<E> extends FileRingBuffer implements Iterabl
 			return this;
 		}
 
+		@Override
 		public ObjectRingBuffer<E> build() throws IOException {
 			return new ObjectRingBuffer<>(this);
 		}
