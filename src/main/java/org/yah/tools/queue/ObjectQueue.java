@@ -1,10 +1,10 @@
-package org.yah.tools.ringbuffer.impl.object;
+package org.yah.tools.queue;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collection;
 
-public interface ObjectRingBuffer<E> extends Iterable<E>, Closeable {
+public interface ObjectQueue<E> extends Iterable<E>, Closeable {
 
 	/**
 	 * number of elements in buffer

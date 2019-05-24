@@ -6,6 +6,7 @@ import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -196,17 +197,26 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	protected final synchronized <C> C waitFor(Supplier<C> contextSupplier,
 			Predicate<C> contextPredicate)
 			throws InterruptedIOException {
+		return waitFor(contextSupplier, contextPredicate, 0, TimeUnit.MILLISECONDS);
+	}
+
+	protected final synchronized <C> C waitFor(Supplier<C> contextSupplier,
+			Predicate<C> contextPredicate, long timeout, TimeUnit timeUnit)
+			throws InterruptedIOException {
 		C last = contextSupplier.get();
-		while (!contextPredicate.test(last)) {
+		long remaining = timeUnit.toMillis(timeout);
+		long timeLimit = remaining > 0 ? System.currentTimeMillis() + remaining : 0;
+		while (!contextPredicate.test(last) && remaining > 0) {
 			try {
-				wait();
+				wait(remaining);
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
 				throw new InterruptedIOException();
 			}
 			last = contextSupplier.get();
+			remaining = timeLimit - System.currentTimeMillis();
 		}
-		return last;
+		return contextPredicate.test(last) ? last : null;
 	}
 
 	protected final synchronized <V> Optional<V> convertIf(Predicate<RingBufferState> predicate,

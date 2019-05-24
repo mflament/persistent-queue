@@ -1,4 +1,4 @@
-package org.yah.tools.ringbuffer.impl.object;
+package org.yah.tools.queue.impl;
 
 final class SizedObject<E> {
 	

@@ -3,6 +3,8 @@ package org.yah.tools.ringbuffer.impl;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ConcurrentModificationException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.UnaryOperator;
 
 public class RingBufferInputStream extends InputStream {
@@ -28,6 +30,22 @@ public class RingBufferInputStream extends InputStream {
 		ReadSnapshot snapshot = ringBuffer.waitFor(this::newSnapshot, c -> closed || c.available() != 0);
 		if (closed)
 			throw new RingBufferClosedException();
+
+		if (snapshot.available() < 0)
+			throw new ConcurrentModificationException();
+
+		read(snapshot, singleByte, 0, 1);
+		return singleByte[0] & 0xFF;
+	}
+
+	public int read(long timeout, TimeUnit timeUnit) throws IOException, TimeoutException {
+		ReadSnapshot snapshot = ringBuffer.waitFor(this::newSnapshot, c -> closed || c.available() != 0, 
+				timeout, timeUnit);
+		if (closed)
+			throw new RingBufferClosedException();
+		
+		if(snapshot == null)
+			throw new TimeoutException();
 
 		if (snapshot.available() < 0)
 			throw new ConcurrentModificationException();

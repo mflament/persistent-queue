@@ -1,4 +1,4 @@
-package org.yah.tools.ringbuffer.impl.object.converters;
+package org.yah.tools.queue.impl.converters;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -8,10 +8,10 @@ import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.io.Serializable;
 
-import org.yah.tools.ringbuffer.impl.object.ObjectConverter;
+import org.yah.tools.queue.impl.ObjectConverter;
 
 /**
- * !!! Do not close input or output streams here, not out job !!!<br/>
+ * !!! Do not close input or output streams here, not our job !!!<br/>
  * So, we can not close the ObjectInputStream or ObjectOutputStream.
  */
 public class SerializableConverter<E extends Serializable> implements ObjectConverter<E> {

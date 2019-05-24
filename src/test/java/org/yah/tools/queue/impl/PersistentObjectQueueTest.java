@@ -1,4 +1,4 @@
-package org.yah.tools.ringbuffer.impl.object;
+package org.yah.tools.queue.impl;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -11,32 +11,33 @@ import java.util.Collections;
 import java.util.Iterator;
 
 import org.junit.Test;
-import org.yah.tools.ringbuffer.impl.object.ObjectRingBufferImpl;
+import org.yah.tools.queue.ObjectQueue;
+import org.yah.tools.queue.impl.PersistentObjectQueue;
 
-public class ObjectRingBufferImplTest {
+public class PersistentObjectQueueTest {
 
-	private ObjectRingBufferImpl<String> createBuffer(boolean delete) throws IOException {
+	private PersistentObjectQueue<String> createBuffer(boolean delete) throws IOException {
 		File file = new File("target/test/ring-buffers/object-buffer.dat");
 		if (!file.getParentFile().exists() && !file.getParentFile().mkdirs())
 			throw new IOException("Unable to create directory " + file.getParentFile());
 		if (delete && file.exists())
 			file.delete();
-		return ObjectRingBufferImpl.<String>builder()
+		return PersistentObjectQueue.<String>builder()
 			.withFile(file)
 			.build();
 	}
 
-	private ObjectRingBufferImpl<String> newBuffer() throws IOException {
+	private PersistentObjectQueue<String> newBuffer() throws IOException {
 		return createBuffer(true);
 	}
 
-	private ObjectRingBuffer<String> loadBuffer() throws IOException {
+	private ObjectQueue<String> loadBuffer() throws IOException {
 		return createBuffer(false);
 	}
 
 	@Test
 	public void test_write() throws IOException {
-		try (ObjectRingBuffer<String> buffer = newBuffer()) {
+		try (ObjectQueue<String> buffer = newBuffer()) {
 			assertEquals(0, buffer.elementsCount());
 			buffer.write(Collections.singleton("value"));
 			assertEquals(1, buffer.elementsCount());
@@ -47,12 +48,12 @@ public class ObjectRingBufferImplTest {
 
 	@Test
 	public void test_write_persistency() throws IOException {
-		try (ObjectRingBuffer<String> buffer = newBuffer()) {
+		try (ObjectQueue<String> buffer = newBuffer()) {
 			buffer.write(Collections.singleton("value"));
 			assertEquals(1, buffer.elementsCount());
 		}
 
-		try (ObjectRingBuffer<String> buffer = loadBuffer()) {
+		try (ObjectQueue<String> buffer = loadBuffer()) {
 			assertEquals(1, buffer.elementsCount());
 			String actual = buffer.poll();
 			assertEquals("value", actual);
@@ -61,7 +62,7 @@ public class ObjectRingBufferImplTest {
 
 	@Test
 	public void test_poll() throws IOException {
-		try (ObjectRingBuffer<String> buffer = newBuffer()) {
+		try (ObjectQueue<String> buffer = newBuffer()) {
 			buffer.write(Arrays.asList("value1", "value2"));
 			assertEquals(2, buffer.elementsCount());
 
@@ -80,7 +81,7 @@ public class ObjectRingBufferImplTest {
 
 	@Test
 	public void test_iterator() throws IOException {
-		try (ObjectRingBufferImpl<String> buffer = newBuffer()) {
+		try (PersistentObjectQueue<String> buffer = newBuffer()) {
 			buffer.write(Arrays.asList("value1", "value2", "value3"));
 			Iterator<String> iterator = buffer.iterator();
 			assertTrue(iterator.hasNext());

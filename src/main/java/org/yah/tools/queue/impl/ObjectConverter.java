@@ -1,4 +1,4 @@
-package org.yah.tools.ringbuffer.impl.object;
+package org.yah.tools.queue.impl;
 
 import java.io.IOException;
 import java.io.InputStream;

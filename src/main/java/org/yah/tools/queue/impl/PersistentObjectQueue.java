@@ -1,4 +1,4 @@
-package org.yah.tools.ringbuffer.impl.object;
+package org.yah.tools.queue.impl;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -13,14 +13,15 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 
+import org.yah.tools.queue.ObjectQueue;
+import org.yah.tools.queue.impl.converters.SerializableConverter;
 import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
 import org.yah.tools.ringbuffer.impl.RingBufferState;
 import org.yah.tools.ringbuffer.impl.RingPosition;
 import org.yah.tools.ringbuffer.impl.file.FileRingBuffer;
 import org.yah.tools.ringbuffer.impl.file.FileRingBuffer.SyncMode;
-import org.yah.tools.ringbuffer.impl.object.converters.SerializableConverter;
 
-public final class ObjectRingBufferImpl<E> implements  ObjectRingBuffer<E> {
+public final class PersistentObjectQueue<E> implements  ObjectQueue<E> {
 
 	private final ObjectFileRingBuffer fileBuffer;
 
@@ -34,7 +35,7 @@ public final class ObjectRingBufferImpl<E> implements  ObjectRingBuffer<E> {
 
 	private int lastElementSize;
 
-	private ObjectRingBufferImpl(Builder<E> builder)
+	private PersistentObjectQueue(Builder<E> builder)
 			throws IOException {
 		this.fileBuffer = new ObjectFileRingBuffer(builder.fileBufferBuilder);
 		this.converter = builder.converter;
@@ -330,8 +331,8 @@ public final class ObjectRingBufferImpl<E> implements  ObjectRingBuffer<E> {
 			return this;
 		}
 
-		public ObjectRingBufferImpl<E> build() throws IOException {
-			return new ObjectRingBufferImpl<>(this);
+		public PersistentObjectQueue<E> build() throws IOException {
+			return new PersistentObjectQueue<>(this);
 		}
 	}
 
