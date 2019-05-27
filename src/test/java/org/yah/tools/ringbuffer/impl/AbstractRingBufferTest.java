@@ -5,26 +5,20 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.ConcurrentModificationException;
-import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.yah.tools.ringbuffer.impl.AbstractRingBuffer;
-import org.yah.tools.ringbuffer.impl.RingBufferClosedException;
-import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
-import org.yah.tools.ringbuffer.impl.RingBufferState;
-import org.yah.tools.ringbuffer.impl.RingBufferUtils;
 
 public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
@@ -46,6 +40,10 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 	protected void closeBuffer() throws IOException {}
 
 	protected abstract R createRingBuffer(int capacity, int limit) throws IOException;
+
+	protected R createFloodBuffer() throws IOException {
+		return createRingBuffer(CAPACITY, 1024 * 1024);
+	}
 
 	@Test
 	public void testWrap() {
@@ -128,19 +126,18 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
 	@Test
 	public void test_concurrent() throws IOException, InterruptedException {
-		List<byte[]> actuals = new ArrayList<>();
-		AtomicBoolean stopped = new AtomicBoolean();
+		byte[] actuals = new byte[CAPACITY];
+		CountDownLatch countDownLatch = new CountDownLatch(1);
 		new Thread(() -> {
 			try (InputStream is = createReader()) {
-				byte[] buffer = new byte[CAPACITY];
-				while (!stopped.get()) {
-					int read = is.read(buffer);
-					if (read > 0) {
-						byte[] actual = new byte[read];
-						System.arraycopy(buffer, 0, actual, 0, read);
-						actuals.add(actual);
-					}
+				int index = 0;
+				while (index < CAPACITY) {
+					int read = is.read();
+					if (read < 0)
+						throw new EOFException();
+					actuals[index++] = (byte) read;
 				}
+				countDownLatch.countDown();
 			} catch (IOException e) {
 				throw new UncheckedIOException(e);
 			}
@@ -154,13 +151,8 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 			offset += chunkSizes[i];
 			Thread.sleep(20);
 		}
-		stopped.set(true);
-		offset = 0;
-		for (int i = 0; i < chunkSizes.length; i++) {
-			byte[] actual = actuals.get(i);
-			assertArrayEquals(copyOfRange(data, offset, offset + chunkSizes[i]), actual);
-			offset += chunkSizes[i];
-		}
+		countDownLatch.await();
+		assertArrayEquals(data, actuals);
 	}
 
 	@Test // (timeout = 5000)
@@ -203,7 +195,9 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		int messageSize = 36;
 		int messageCount = 5000;
 
-		ringBuffer = createRingBuffer(CAPACITY, 1024 * 1024);
+		ringBuffer = createFloodBuffer();
+
+		byte[] data = data(messageSize);
 
 		MessageDigest readerDigest = MessageDigest.getInstance("SHA-1");
 		CountDownLatch closeLatch = new CountDownLatch(1);
@@ -212,6 +206,9 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 				int remaining = messageCount;
 				while (remaining > 0) {
 					byte[] msg = RingBufferUtils.readFully(is, messageSize);
+					if (!Arrays.equals(data, msg))
+						System.out.println("will fail");
+
 					readerDigest.update(msg);
 					remaining--;
 					ringBuffer.remove(messageSize);
@@ -226,7 +223,6 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		});
 		thread.start();
 
-		byte[] data = data(messageSize);
 		MessageDigest writerDigest = MessageDigest.getInstance("SHA-1");
 		for (int i = 0; i < messageCount; i++) {
 			write(data);

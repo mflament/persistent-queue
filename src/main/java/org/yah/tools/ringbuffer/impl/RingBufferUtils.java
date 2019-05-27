@@ -9,7 +9,12 @@ import java.util.Objects;
 public final class RingBufferUtils {
 
 	private RingBufferUtils() {}
-
+	
+	@FunctionalInterface
+	public interface IOFunction<T, R> {
+		R apply(T input) throws IOException;
+	}
+	
 	public static final boolean isPowerOfTwo(int n) {
 		return (n & (n - 1)) == 0;
 	}

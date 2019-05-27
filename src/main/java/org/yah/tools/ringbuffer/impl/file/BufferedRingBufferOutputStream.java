@@ -5,6 +5,12 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.function.Supplier;
 
+import org.yah.tools.ringbuffer.impl.RingBufferOutputStream;
+
+/**
+ * An {@link OutputStream} buffering data to improve file performance.<br/>
+ * Delegate to an {@link RingBufferOutputStream} to do the actual loading.
+ */
 public class BufferedRingBufferOutputStream extends OutputStream {
 
 	private final byte[] singleByte = new byte[1];

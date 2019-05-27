@@ -123,9 +123,9 @@ public final class RingPosition {
 		return new RingPosition(position + offset, nextCycle, newCapacity);
 	}
 
-	public RingPosition shrink(RingPosition fromStart, int newCapacity) {
-		int nextPos = substract(fromStart);
-		long nextCycle = fromStart.cycle;
+	public RingPosition shrink(RingPosition from, int newCapacity) {
+		int nextPos = substract(from);
+		long nextCycle = from.cycle;
 		if (nextPos < 0)
 			nextCycle--;
 		return new RingPosition(nextPos, nextCycle, newCapacity);

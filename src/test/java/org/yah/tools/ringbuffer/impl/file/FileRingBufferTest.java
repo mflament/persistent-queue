@@ -22,8 +22,20 @@ public class FileRingBufferTest extends AbstractRingBufferTest<FileRingBuffer> {
 			throw new IllegalStateException("Unable to delete " + ringBufferFile);
 		return FileRingBuffer.builder(ringBufferFile)
 			.withCapacity(capacity)
-			.withLimit(limit)
-			.withDefaultReaderCache(1024 * 4)
+			.withDefaultReaderCache(0)
+			.withDefaultWriteBufferSize(0)
+			.build();
+	}
+
+	@Override
+	protected FileRingBuffer createFloodBuffer() throws IOException {
+		if (ringBufferFile.exists() && !ringBufferFile.delete())
+			throw new IllegalStateException("Unable to delete " + ringBufferFile);
+		return FileRingBuffer.builder(ringBufferFile)
+			.withCapacity(CAPACITY)
+			.withLimit(1024 * 1024)
+			.withDefaultReaderCache(4 * 1024)
+			.withDefaultWriteBufferSize(8 * 1024)
 			.build();
 	}
 

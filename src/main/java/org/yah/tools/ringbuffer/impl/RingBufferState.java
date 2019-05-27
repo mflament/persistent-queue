@@ -58,10 +58,7 @@ public class RingBufferState {
 		int distance = from.substract(position);
 		if (distance < 0)
 			return -1;
-		int res = size - distance;
-		if (res < 0)
-			throw new IllegalStateException();
-		return res;
+		return Math.max(0, size - distance);
 	}
 
 	public boolean wrapped() {

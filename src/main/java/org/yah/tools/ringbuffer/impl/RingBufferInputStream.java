@@ -6,11 +6,20 @@ import java.util.ConcurrentModificationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.yah.tools.ringbuffer.impl.RingBufferUtils.IOFunction;
+
+/**
+ * {@link InputStream} used to read from the eldest element of the ring buffer
+ * to the newest (FIFO).<br/>
+ * This can be used concurrently with any writer threads. But it's not thread
+ * safe, so only one thread can use this {@link InputStream} at the same time.
+ * 
+ */
 public class RingBufferInputStream extends InputStream {
 
 	private final byte[] singleByte = new byte[1];
 
-	protected final AbstractRingBuffer ringBuffer;
+	private final AbstractRingBuffer ringBuffer;
 
 	private RingPosition ringPosition;
 
@@ -21,55 +30,95 @@ public class RingBufferInputStream extends InputStream {
 		this.ringPosition = ringBuffer.state().position();
 	}
 
-
 	@Override
 	public int read() throws IOException {
-		ReadSnapshot snapshot = ringBuffer.waitFor(this::snapshot, c -> closed || c.available() != 0);
-		if (closed)
-			throw new RingBufferClosedException();
-
-		if (snapshot.available() < 0)
-			throw new ConcurrentModificationException(snapshot.toString());
-
-		read(snapshot, singleByte, 0, 1);
-		return singleByte[0] & 0xFF;
+		return awaitInput(this::readByte);
 	}
 
 	public int read(long timeout, TimeUnit timeUnit) throws IOException, TimeoutException {
-		ReadSnapshot snapshot = ringBuffer.waitFor(this::snapshot, c -> closed || c.available() != 0,
+		return waitInput(this::readByte, timeout, timeUnit);
+	}
+
+	public <T> T awaitInput(IOFunction<ReadSnapshot, T> handler) throws IOException {
+		try {
+			return this.waitInput(handler, 0, TimeUnit.MILLISECONDS);
+		} catch (TimeoutException e) {
+			throw new IllegalStateException("timed out without time out ??", e);
+		}
+	}
+
+	public <T> T waitInput(IOFunction<ReadSnapshot, T> handler, long timeout, TimeUnit timeUnit)
+			throws TimeoutException, IOException {
+		return ringBuffer.waitFor(this::snapshot,
+				s -> closed || s.available() != 0, handler,
 				timeout, timeUnit);
+	}
+
+	/**
+	 * synchronized with ring buffer, we have a byte to read for sure
+	 */
+	private int readByte(ReadSnapshot snapshot) throws IOException {
 		if (closed)
 			throw new RingBufferClosedException();
 
-		if (snapshot == null)
-			throw new TimeoutException();
+		if (snapshot.removed())
+			throw new ConcurrentModificationException(snapshot.toString());
 
-		if (snapshot.available() < 0)
-			throw new ConcurrentModificationException();
-
-		read(snapshot, singleByte, 0, 1);
+		snapshot.read(singleByte, 0, 1);
+		ringPosition = ringPosition.advance(1);
 		return singleByte[0] & 0xFF;
 	}
 
 	@Override
 	public int read(byte[] target, int offset, int length) throws IOException {
 		RingBufferUtils.validateBufferParams(target, offset, length);
-
-		ReadSnapshot snapshot = snapshot();
-		int available = snapshot.available();
-		if (available < 0)
-			throw new ConcurrentModificationException();
-		int read = Integer.min(length, available);
-		if (read == 0)
+		if (length == 0)
 			return 0;
 
-		read(snapshot, target, offset, read);
+		// get a stable working state, but without any lock
+		ReadSnapshot snapshot;
+		int read;
+		do {
+			snapshot = snapshot();
+			// ensure that our current position has not been deleted
+			if (snapshot.removed())
+				throw new ConcurrentModificationException(snapshot.toString());
+
+			// get size to read, either requested length, or only what's available
+			read = Integer.min(length, snapshot.available());
+			if (read == 0)
+				break;
+
+			snapshot.read(target, offset, read);
+		} while (!advance(snapshot, length));
 		return read;
 	}
 
-	protected void read(ReadSnapshot snapshot, byte[] target, int offset, int length) throws IOException {
-		snapshot.read(target, offset, length);
-		advance(length);
+	private boolean advance(ReadSnapshot snapshot, int length) {
+		synchronized (ringBuffer) {
+			// check the current snapshot with the one used to make the copy from the buffer
+			// When we where reading from snapshot buffer, the buffer could have been
+			// truncated by another thread (remove), or rotated due to a capacity increase
+			// (ensureCapacity).
+			// In either way, we can not deliver the data that was read
+			ReadSnapshot actualSnapshot = snapshot();
+
+			if (actualSnapshot.state.position.after(snapshot.position)) {
+				// We have read data that are now removed, no need to try again
+				throw new ConcurrentModificationException();
+			}
+
+			if (!snapshot.position.equals(actualSnapshot.position)) {
+				// Our ring position was changed by a concurrent write who need some space and
+				// trigger a capacity grow
+				// We have potentially read invalid data, try again
+				return false;
+			}
+
+			// data that we just read are still valid, advance to next position
+			ringPosition = ringPosition.advance(length);
+			return true;
+		}
 	}
 
 	@Override
@@ -79,11 +128,13 @@ public class RingBufferInputStream extends InputStream {
 		if (available < 0)
 			throw new ConcurrentModificationException();
 		int skipped = Integer.min((int) n, available);
-		advance(skipped);
+		synchronized (ringBuffer) {
+			ringPosition = ringPosition.advance(skipped);
+		}
 		return skipped;
 	}
 
-	public final RingPosition ringPosition() {
+	public RingPosition ringPosition() {
 		return ringPosition;
 	}
 
@@ -111,33 +162,25 @@ public class RingBufferInputStream extends InputStream {
 		ringPosition = ringPosition.shrink(fromState.position(), newCapacity);
 	}
 
-	protected final void advance(int length) {
-		synchronized (ringBuffer) {
-			this.ringPosition = ringPosition.advance(length);
-		}
-	}
-
-	protected final void setRingPosition(RingPosition position) {
-		synchronized (ringBuffer) {
-			this.ringPosition = position;
-		}
-	}
-
-	protected ReadSnapshot snapshot() {
+	private ReadSnapshot snapshot() {
 		synchronized (ringBuffer) {
 			return new ReadSnapshot(ringBuffer.linearBuffer(), ringBuffer.state(), ringPosition);
 		}
 	}
 
-	protected static class ReadSnapshot {
+	/**
+	 * A state of all the ring buffer properties and the reader ring position
+	 * required to do reading asynchronously
+	 */
+	public static class ReadSnapshot {
 
-		protected final LinearBuffer linearBuffer;
+		private final LinearBuffer linearBuffer;
 
-		protected final RingBufferState state;
+		private final RingBufferState state;
 
-		protected final RingPosition position;
+		private final RingPosition position;
 
-		protected ReadSnapshot(LinearBuffer linearBuffer, RingBufferState state, RingPosition position) {
+		private ReadSnapshot(LinearBuffer linearBuffer, RingBufferState state, RingPosition position) {
 			this.linearBuffer = linearBuffer;
 			this.state = state;
 			this.position = position;
@@ -145,12 +188,15 @@ public class RingBufferInputStream extends InputStream {
 				throw new IllegalStateException();
 		}
 
-		protected void read(byte[] target, int offset, int length) throws IOException {
-			state.execute(position.position(), length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
+		/**
+		 * 
+		 */
+		public boolean removed() {
+			return state.position.after(position);
 		}
 
-		protected void read(int position, byte[] target, int offset, int length) throws IOException {
-			state.execute(position, length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
+		private void read(byte[] target, int offset, int length) throws IOException {
+			state.execute(position.position(), length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
 		}
 
 		public int available() {

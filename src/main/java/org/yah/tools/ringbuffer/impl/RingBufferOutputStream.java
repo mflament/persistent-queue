@@ -3,6 +3,21 @@ package org.yah.tools.ringbuffer.impl;
 import java.io.IOException;
 import java.io.OutputStream;
 
+import org.yah.tools.ringbuffer.RingBuffer;
+
+/**
+ * {@link OutputStream} allowing to append bytes to the ring buffer.<br/>
+ * Data are directly written in the underlying {@link LinearBuffer}, but the
+ * {@link RingBuffer} state size increment is done when the stream is closed or
+ * flushed, making the new data available to the readers.<br/>
+ * <p>
+ * Can be used with concurrent reader or remove, but not thread safe itself (do
+ * not use an instance of RingBufferOutputStream in multiple threads).<br/>
+ * A single {@link RingBufferOutputStream} can be used at a time,
+ * {@link RingBuffer} will wait for the previous one to be closed in order to
+ * give a new one.
+ * </p>
+ */
 public class RingBufferOutputStream extends OutputStream {
 
 	private final byte[] singleByte = new byte[1];

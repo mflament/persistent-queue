@@ -8,12 +8,14 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import org.yah.tools.ringbuffer.RingBuffer;
 import org.yah.tools.ringbuffer.UncheckedInterruptedException;
+import org.yah.tools.ringbuffer.impl.RingBufferUtils.IOFunction;
 
 /**
  * Abstract implementation of {@link RingBuffer}<br/>
@@ -94,7 +96,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		return removed;
 	}
 
-	protected final void addInputStream(BufferedRingBufferInputStream is) {
+	protected final void addInputStream(RingBufferInputStream is) {
 		inputStreams.add(is);
 	}
 
@@ -184,28 +186,81 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		return state.capacity() - state.size();
 	}
 
+	private void transferTo(LinearBuffer target, RingBufferState fromState) throws IOException {
+		int startPosition = fromState.position().position();
+		int writePosition = fromState.writePosition();
+		if (fromState.wrapped()) {
+			// wrapped, copy end of buffer to other buffer at same position
+			linearBuffer.copyTo(target, startPosition, startPosition, fromState.capacity() - startPosition);
+			// since wrapped, transfer tail of ring from actual buffer start to new buffer
+			// end
+			linearBuffer.copyTo(target, 0, fromState.capacity(), writePosition);
+		} else {
+			// direct copy, same position
+			linearBuffer.copyTo(target, startPosition, startPosition, fromState.size());
+		}
+	}
+
+	protected final synchronized <C, T> T waitFor(Supplier<C> contextSupplier,
+			Predicate<C> contextPredicate,
+			IOFunction<C, T> contextHandler)
+			throws TimeoutException, IOException {
+		return waitFor(contextSupplier, contextPredicate, contextHandler, 0, TimeUnit.MILLISECONDS);
+	}
+
+	protected final synchronized <C, T> T waitFor(Supplier<C> contextSupplier,
+			Predicate<C> contextPredicate, IOFunction<C, T> contextHandler,
+			long timeout, TimeUnit timeUnit)
+			throws TimeoutException, IOException {
+		C last = contextSupplier.get();
+		long remaining = timeout > 0 ? timeUnit.toMillis(timeout) : 1;
+		long timeLimit = remaining > 0 ? System.currentTimeMillis() + remaining : 0;
+		while (!contextPredicate.test(last) && remaining > 0) {
+			try {
+				wait(remaining);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new InterruptedIOException();
+			}
+			last = contextSupplier.get();
+			if (timeout > 0)
+				remaining = timeLimit - System.currentTimeMillis();
+		}
+		if (contextPredicate.test(last))
+			return contextHandler.apply(last);
+
+		throw new TimeoutException();
+	}
+
 	@Override
 	public String toString() {
 		StringBuilder sb = new StringBuilder();
 		sb.append(getClass().getSimpleName());
-		sb.append(" [capacity=").append(capacity());
+		RingBufferState currentState = state();
+		sb.append(" [start=")
+			.append(currentState.position().position())
+			.append(", size=")
+			.append(currentState.size())
+			.append(", write=")
+			.append(currentState.writePosition())
+			.append(", capacity=")
+			.append(currentState.capacity());
 		if (limit > 0)
 			sb.append(", limit=").append(limit);
 		sb.append("]").append(System.lineSeparator());
 		int width = 80;
 		sb.append('|');
-		RingBufferState state = state();
-		if (state.isEmpty()) {
+		if (currentState.isEmpty()) {
 			for (int i = 0; i < width; i++)
 				sb.append('-');
 		} else {
-			float factor = width / (float) state.capacity();
-			int readPos = (int) (state.position().position() * factor);
-			int writePos = (int) (state.writePosition() * factor) - 1;
+			float factor = width / (float) currentState.capacity();
+			int readPos = (int) (currentState.position().position() * factor);
+			int writePos = (int) (currentState.writePosition() * factor) - 1;
 			if (writePos < 0)
 				writePos = width;
 			int i = 0;
-			if (state.wrapped()) {
+			if (currentState.wrapped()) {
 				for (; i < writePos; i++)
 					sb.append('#');
 				sb.append('>');
@@ -227,46 +282,6 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		}
 		sb.append('|');
 		return sb.toString();
-	}
-
-	private void transferTo(LinearBuffer target, RingBufferState fromState) throws IOException {
-		int startPosition = fromState.position().position();
-		int writePosition = fromState.writePosition();
-		if (fromState.wrapped()) {
-			// wrapped, copy end of buffer to other buffer at same position
-			linearBuffer.copyTo(target, startPosition, startPosition, fromState.capacity() - startPosition);
-			// since wrapped, transfer tail of ring from actual buffer start to new buffer
-			// end
-			linearBuffer.copyTo(target, 0, fromState.capacity(), writePosition);
-		} else {
-			// direct copy, same position
-			linearBuffer.copyTo(target, startPosition, startPosition, fromState.size());
-		}
-	}
-
-	protected final synchronized <C> C waitFor(Supplier<C> contextSupplier,
-			Predicate<C> contextPredicate)
-			throws InterruptedIOException {
-		return waitFor(contextSupplier, contextPredicate, 0, TimeUnit.MILLISECONDS);
-	}
-
-	protected final synchronized <C> C waitFor(Supplier<C> contextSupplier,
-			Predicate<C> contextPredicate, long timeout, TimeUnit timeUnit)
-			throws InterruptedIOException {
-		C last = contextSupplier.get();
-		long remaining = timeout > 0 ? timeUnit.toMillis(timeout) : Long.MAX_VALUE;
-		long timeLimit = remaining > 0 ? System.currentTimeMillis() + remaining : Long.MAX_VALUE;
-		while (!contextPredicate.test(last) && remaining > 0) {
-			try {
-				wait(remaining);
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-				throw new InterruptedIOException();
-			}
-			last = contextSupplier.get();
-			remaining = timeLimit - System.currentTimeMillis();
-		}
-		return contextPredicate.test(last) ? last : null;
 	}
 
 }

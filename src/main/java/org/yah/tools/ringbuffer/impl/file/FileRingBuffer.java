@@ -17,8 +17,8 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.yah.tools.ringbuffer.impl.AbstractRingBuffer;
-import org.yah.tools.ringbuffer.impl.BufferedRingBufferInputStream;
 import org.yah.tools.ringbuffer.impl.LinearBuffer;
+import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
 import org.yah.tools.ringbuffer.impl.RingBufferState;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils;
 
@@ -92,7 +92,20 @@ public class FileRingBuffer extends AbstractRingBuffer {
 	}
 
 	public OutputStream writer(int bufferSize) {
-		return new BufferedRingBufferOutputStream(super::writer, bufferSize);
+		if (bufferSize > 0)
+			return new BufferedRingBufferOutputStream(super::writer, bufferSize);
+		return super.writer();
+	}
+
+	@Override
+	public InputStream reader() {
+		return reader(defaultReaderCache);
+	}
+
+	public synchronized InputStream reader(int bufferSize) {
+		if (bufferSize > 0)
+			return new BufferedRingBufferInputStream((RingBufferInputStream) super.reader(), bufferSize);
+		return super.reader();
 	}
 
 	@Override
@@ -120,17 +133,6 @@ public class FileRingBuffer extends AbstractRingBuffer {
 		intBuffer.put(state.position().position());
 		intBuffer.put(state.size());
 		intBuffer.put(state.position().capacity());
-	}
-
-	@Override
-	public InputStream reader() {
-		return reader(defaultReaderCache);
-	}
-
-	public synchronized InputStream reader(int bufferSize) {
-		BufferedRingBufferInputStream is = new BufferedRingBufferInputStream(this, bufferSize);
-		addInputStream(is);
-		return is;
 	}
 
 	@Override
