@@ -20,7 +20,11 @@ public class FileRingBufferTest extends AbstractRingBufferTest<FileRingBuffer> {
 		ringBufferFile.getParentFile().mkdirs();
 		if (ringBufferFile.exists() && !ringBufferFile.delete())
 			throw new IllegalStateException("Unable to delete " + ringBufferFile);
-		return FileRingBuffer.builder(ringBufferFile).withCapacity(capacity).withLimit(limit).build();
+		return FileRingBuffer.builder(ringBufferFile)
+			.withCapacity(capacity)
+			.withLimit(limit)
+			.withDefaultReaderCache(1024 * 4)
+			.build();
 	}
 
 	@Override

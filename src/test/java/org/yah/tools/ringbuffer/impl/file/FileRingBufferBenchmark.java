@@ -4,14 +4,14 @@ import static org.junit.Assert.assertArrayEquals;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.CountDownLatch;
 
 import org.yah.tools.ringbuffer.impl.RingBufferClosedException;
-import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils;
-import org.yah.tools.ringbuffer.impl.file.FileRingBuffer;
 import org.yah.tools.ringbuffer.impl.file.FileRingBuffer.SyncMode;
 
 public class FileRingBufferBenchmark {
@@ -47,7 +47,7 @@ public class FileRingBufferBenchmark {
 		StringBuilder logBuilder = new StringBuilder();
 		Thread thread = new Thread(() -> {
 			long timeToRead = 0, timeToRemove = 0;
-			try (RingBufferInputStream is = ringBuffer.reader()) {
+			try (InputStream is = ringBuffer.reader()) {
 				int remaining = messageCount;
 				while (remaining > 0) {
 					long start = System.currentTimeMillis();
@@ -81,7 +81,9 @@ public class FileRingBufferBenchmark {
 		final MessageDigest writerDigest = MessageDigest.getInstance("SHA-1");
 		while (remaining > 0) {
 			long start = System.currentTimeMillis();
-			ringBuffer.writer().write(message);
+			try (OutputStream os = ringBuffer.writer()) {
+				os.write(message);
+			}
 			writerDigest.update(message);
 			timeToWrite += System.currentTimeMillis() - start;
 			remaining--;

@@ -8,11 +8,9 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Iterator;
 
 import org.junit.Test;
 import org.yah.tools.queue.ObjectQueue;
-import org.yah.tools.queue.impl.PersistentObjectQueue;
 
 public class PersistentObjectQueueTest {
 
@@ -39,7 +37,7 @@ public class PersistentObjectQueueTest {
 	public void test_write() throws IOException {
 		try (ObjectQueue<String> buffer = newBuffer()) {
 			assertEquals(0, buffer.elementsCount());
-			buffer.write(Collections.singleton("value"));
+			buffer.offer(Collections.singleton("value"));
 			assertEquals(1, buffer.elementsCount());
 			String actual = buffer.poll();
 			assertEquals("value", actual);
@@ -49,7 +47,7 @@ public class PersistentObjectQueueTest {
 	@Test
 	public void test_write_persistency() throws IOException {
 		try (ObjectQueue<String> buffer = newBuffer()) {
-			buffer.write(Collections.singleton("value"));
+			buffer.offer(Collections.singleton("value"));
 			assertEquals(1, buffer.elementsCount());
 		}
 
@@ -63,7 +61,7 @@ public class PersistentObjectQueueTest {
 	@Test
 	public void test_poll() throws IOException {
 		try (ObjectQueue<String> buffer = newBuffer()) {
-			buffer.write(Arrays.asList("value1", "value2"));
+			buffer.offer(Arrays.asList("value1", "value2"));
 			assertEquals(2, buffer.elementsCount());
 
 			String actual = buffer.poll();
@@ -82,18 +80,19 @@ public class PersistentObjectQueueTest {
 	@Test
 	public void test_iterator() throws IOException {
 		try (PersistentObjectQueue<String> buffer = newBuffer()) {
-			buffer.write(Arrays.asList("value1", "value2", "value3"));
-			Iterator<String> iterator = buffer.iterator();
-			assertTrue(iterator.hasNext());
-			assertEquals("value1", iterator.next());
-			
-			assertTrue(iterator.hasNext());
-			assertEquals("value2", iterator.next());
-			
-			assertTrue(iterator.hasNext());
-			assertEquals("value3", iterator.next());			
+			buffer.offer(Arrays.asList("value1", "value2", "value3"));
+			try (QueueCursor<String> cursor = buffer.cursor()) {
+				assertTrue(cursor.hasNext());
+				assertEquals("value1", cursor.next());
 
-			assertFalse(iterator.hasNext());
+				assertTrue(cursor.hasNext());
+				assertEquals("value2", cursor.next());
+
+				assertTrue(cursor.hasNext());
+				assertEquals("value3", cursor.next());
+
+				assertFalse(cursor.hasNext());
+			}
 		}
 
 	}

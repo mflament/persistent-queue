@@ -5,13 +5,12 @@ import java.io.InputStream;
 import java.util.ConcurrentModificationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.UnaryOperator;
 
 public class RingBufferInputStream extends InputStream {
 
 	private final byte[] singleByte = new byte[1];
 
-	private final AbstractRingBuffer ringBuffer;
+	protected final AbstractRingBuffer ringBuffer;
 
 	private RingPosition ringPosition;
 
@@ -22,29 +21,27 @@ public class RingBufferInputStream extends InputStream {
 		this.ringPosition = ringBuffer.state().position();
 	}
 
-	/**
-	 * TODO : add timeout
-	 */
+
 	@Override
 	public int read() throws IOException {
-		ReadSnapshot snapshot = ringBuffer.waitFor(this::newSnapshot, c -> closed || c.available() != 0);
+		ReadSnapshot snapshot = ringBuffer.waitFor(this::snapshot, c -> closed || c.available() != 0);
 		if (closed)
 			throw new RingBufferClosedException();
 
 		if (snapshot.available() < 0)
-			throw new ConcurrentModificationException();
+			throw new ConcurrentModificationException(snapshot.toString());
 
 		read(snapshot, singleByte, 0, 1);
 		return singleByte[0] & 0xFF;
 	}
 
 	public int read(long timeout, TimeUnit timeUnit) throws IOException, TimeoutException {
-		ReadSnapshot snapshot = ringBuffer.waitFor(this::newSnapshot, c -> closed || c.available() != 0, 
+		ReadSnapshot snapshot = ringBuffer.waitFor(this::snapshot, c -> closed || c.available() != 0,
 				timeout, timeUnit);
 		if (closed)
 			throw new RingBufferClosedException();
-		
-		if(snapshot == null)
+
+		if (snapshot == null)
 			throw new TimeoutException();
 
 		if (snapshot.available() < 0)
@@ -72,7 +69,7 @@ public class RingBufferInputStream extends InputStream {
 
 	protected void read(ReadSnapshot snapshot, byte[] target, int offset, int length) throws IOException {
 		snapshot.read(target, offset, length);
-		updateRingPosition(p -> p.advance(length));
+		advance(length);
 	}
 
 	@Override
@@ -82,16 +79,12 @@ public class RingBufferInputStream extends InputStream {
 		if (available < 0)
 			throw new ConcurrentModificationException();
 		int skipped = Integer.min((int) n, available);
-		updateRingPosition(p -> p.advance(skipped));
+		advance(skipped);
 		return skipped;
 	}
 
 	public final RingPosition ringPosition() {
 		return ringPosition;
-	}
-
-	protected final AbstractRingBuffer ringBuffer() {
-		return ringBuffer;
 	}
 
 	@Override
@@ -110,21 +103,27 @@ public class RingBufferInputStream extends InputStream {
 		return String.format("RingBufferInputStream[%s]", ringPosition);
 	}
 
-	protected void updateCapacity(int newCapacity, RingBufferState fromState) {
+	public void updateCapacity(int newCapacity, RingBufferState fromState) {
 		ringPosition = ringPosition.updateCapacity(newCapacity, fromState);
 	}
 
-	protected void updateRingPosition(UnaryOperator<RingPosition> operator) {
+	public void shrink(int newCapacity, RingBufferState fromState) {
+		ringPosition = ringPosition.shrink(fromState.position(), newCapacity);
+	}
+
+	protected final void advance(int length) {
 		synchronized (ringBuffer) {
-			this.ringPosition = operator.apply(ringPosition);
+			this.ringPosition = ringPosition.advance(length);
 		}
 	}
 
-	private synchronized ReadSnapshot snapshot() {
-		return newSnapshot();
+	protected final void setRingPosition(RingPosition position) {
+		synchronized (ringBuffer) {
+			this.ringPosition = position;
+		}
 	}
 
-	protected ReadSnapshot newSnapshot() {
+	protected ReadSnapshot snapshot() {
 		synchronized (ringBuffer) {
 			return new ReadSnapshot(ringBuffer.linearBuffer(), ringBuffer.state(), ringPosition);
 		}
@@ -142,6 +141,8 @@ public class RingBufferInputStream extends InputStream {
 			this.linearBuffer = linearBuffer;
 			this.state = state;
 			this.position = position;
+			if (state.capacity() != position.capacity())
+				throw new IllegalStateException();
 		}
 
 		protected void read(byte[] target, int offset, int length) throws IOException {
@@ -158,7 +159,7 @@ public class RingBufferInputStream extends InputStream {
 
 		@Override
 		public String toString() {
-			return String.format("ReadSnapshot [state=%s, position=%s]", state, position);
+			return String.format("ReadSnapshot [state=%s, position=%s, available=%d]", state, position, available());
 		}
 
 	}

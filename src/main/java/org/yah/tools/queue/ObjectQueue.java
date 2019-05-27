@@ -3,8 +3,12 @@ package org.yah.tools.queue;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
 
-public interface ObjectQueue<E> extends Iterable<E>, Closeable {
+import org.yah.tools.queue.impl.QueueCursor;
+
+public interface ObjectQueue<E> extends Closeable {
 
 	/**
 	 * number of elements in buffer
@@ -27,6 +31,17 @@ public interface ObjectQueue<E> extends Iterable<E>, Closeable {
 	/**
 	 * Write the element to the end of the queue.
 	 */
-	void write(Collection<E> elements) throws IOException;
+	void offer(Iterator<E> elements) throws IOException;
 
+	default void offer(Collection<E> elements) throws IOException {
+		offer(elements.iterator());
+	}
+
+	default void offer(E element) throws IOException {
+		offer(Collections.singleton(element).iterator());
+	}
+
+	void transferTo(ObjectQueue<E> target, int length) throws IOException;
+
+	QueueCursor<E> cursor();
 }

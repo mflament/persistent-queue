@@ -94,15 +94,17 @@ public final class RingPosition {
 		return String.format("RingPosition [position=%s, cycle=%s, capacity=%s]", position, cycle, capacity);
 	}
 
-	public RingPosition advance(int length) {
-		int nextPos = wrap(position + length);
+	public RingPosition advance(int offset) {
+		if (Math.abs(offset) > capacity)
+			throw new IllegalArgumentException("offset can not exceed capacity (" + capacity + ")");
+		if (offset == 0)
+			return this;
+		int nextPos = wrap(position + offset);
 		long nextCycle = cycle;
-
-		if (nextPos < position) {
+		if (offset < 0 && nextPos >= position) {
+			nextCycle--;
+		} else if (offset > 0 && nextPos <= position) {
 			nextCycle++;
-			if (nextCycle < 0) {
-				throw new IllegalStateException("cycle overflow: " + this);
-			}
 		}
 		return new RingPosition(nextPos, nextCycle, capacity);
 	}
@@ -119,6 +121,14 @@ public final class RingPosition {
 			nextCycle--;
 		}
 		return new RingPosition(position + offset, nextCycle, newCapacity);
+	}
+
+	public RingPosition shrink(RingPosition fromStart, int newCapacity) {
+		int nextPos = substract(fromStart);
+		long nextCycle = fromStart.cycle;
+		if (nextPos < 0)
+			nextCycle--;
+		return new RingPosition(nextPos, nextCycle, newCapacity);
 	}
 
 	public void execute(int position, int length, RingAction action) throws IOException {
@@ -139,4 +149,5 @@ public final class RingPosition {
 			action.apply(position, length, 0);
 		}
 	}
+
 }

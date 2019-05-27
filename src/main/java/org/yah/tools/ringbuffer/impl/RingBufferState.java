@@ -31,7 +31,7 @@ public class RingBufferState {
 	protected RingBufferState remove(int length) {
 		RingPosition nextPos = position.advance(length);
 		int nextSize = size - length;
-		return new RingBufferState(nextPos, nextSize);
+		return newState(nextPos, nextSize);
 	}
 
 	public int size() {
@@ -43,18 +43,25 @@ public class RingBufferState {
 	}
 
 	public int writePosition() {
-		return position.wrap(position.position() + size);
+		return wrap(position.position() + size);
+	}
+
+	public RingPosition writePosition(int offset) {
+		return position.advance(size + offset);
 	}
 
 	public RingBufferState incrementSize(int length) {
-		return new RingBufferState(position, size + length);
+		return newState(position, size + length);
 	}
 
 	public int availableToRead(RingPosition from) {
 		int distance = from.substract(position);
 		if (distance < 0)
 			return -1;
-		return size - distance;
+		int res = size - distance;
+		if (res < 0)
+			throw new IllegalStateException();
+		return res;
 	}
 
 	public boolean wrapped() {
@@ -63,11 +70,11 @@ public class RingBufferState {
 
 	public RingBufferState updateCapacity(int newCapacity, RingBufferState fromState) {
 		RingPosition newPos = position.updateCapacity(newCapacity, fromState);
-		return new RingBufferState(newPos, size);
+		return newState(newPos, size);
 	}
 
 	public RingBufferState withCapacity(int newCapacity) {
-		return new RingBufferState(position.withCapacity(newCapacity), size);
+		return newState(position.withCapacity(newCapacity), size);
 	}
 
 	@Override
@@ -75,7 +82,11 @@ public class RingBufferState {
 		return String.format("RingBufferState [position=%s, size=%s]", position, size);
 	}
 
-	protected RingBufferState newState(int position, int cycle, int capacity, int size) {
+	protected final RingBufferState newState(RingPosition ringPosition, int size) {
+		return newState(ringPosition.position(), ringPosition.cycle(), ringPosition.capacity(), size);
+	}
+
+	protected RingBufferState newState(int position, long cycle, int capacity, int size) {
 		return new RingBufferState(position, cycle, capacity, size);
 	}
 
@@ -93,6 +104,14 @@ public class RingBufferState {
 
 	public void execute(int position, int length, RingAction action) throws IOException {
 		this.position.execute(position, length, action);
+	}
+
+	public RingBufferState shrink(int newCapacity) {
+		return newState(new RingPosition(0, cycle(), newCapacity), size);
+	}
+
+	public boolean isEmpty() {
+		return size == 0;
 	}
 
 }

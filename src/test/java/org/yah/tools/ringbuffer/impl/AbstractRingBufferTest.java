@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -201,22 +202,17 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
 		int messageSize = 36;
 		int messageCount = 5000;
-		int dataSize = messageSize * messageCount;
 
 		ringBuffer = createRingBuffer(CAPACITY, 1024 * 1024);
 
-		MessageDigest digest = MessageDigest.getInstance("SHA-1");
-		byte[] data = data(dataSize);
-		byte[] expectedDigest = digest.digest(data);
-		digest.reset();
-
+		MessageDigest readerDigest = MessageDigest.getInstance("SHA-1");
 		CountDownLatch closeLatch = new CountDownLatch(1);
 		Thread thread = new Thread(() -> {
-			try (RingBufferInputStream is = createReader()) {
+			try (InputStream is = createReader()) {
 				int remaining = messageCount;
 				while (remaining > 0) {
 					byte[] msg = RingBufferUtils.readFully(is, messageSize);
-					digest.update(msg);
+					readerDigest.update(msg);
 					remaining--;
 					ringBuffer.remove(messageSize);
 				}
@@ -230,21 +226,20 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		});
 		thread.start();
 
+		byte[] data = data(messageSize);
+		MessageDigest writerDigest = MessageDigest.getInstance("SHA-1");
 		for (int i = 0; i < messageCount; i++) {
-			write(data, i * messageSize, messageSize);
+			write(data);
+			writerDigest.update(data);
 		}
+		byte[] expectedDigest = writerDigest.digest();
 
 		closeLatch.await();
 		ringBuffer.close();
 
-		byte[] actualDigest = digest.digest();
+		byte[] actualDigest = readerDigest.digest();
 		assertArrayEquals(expectedDigest, actualDigest);
 	}
-
-	private RingBufferInputStream createReader() {
-		return ringBuffer.reader();
-	}
-
 
 	@Test
 	public void testEnsureCapacity() throws IOException {
@@ -303,7 +298,7 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
 		// wrap
 		write(data, 0, CAPACITY / 2);
-
+		ringBuffer.toString();
 		RingBufferInputStream is1 = (RingBufferInputStream) createReader();
 		is1.skip(CAPACITY / 2);
 		assertEquals(0, is1.ringPosition().position());
@@ -333,6 +328,10 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		assertEquals(0, is3.ringPosition().cycle());
 	}
 
+	protected InputStream createReader() {
+		return ringBuffer.reader();
+	}
+
 	protected int read(byte[] target) throws IOException {
 		return read(target, 0, target.length);
 	}
@@ -344,11 +343,13 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 	}
 
 	protected void write(byte[] data) throws IOException {
-		ringBuffer.writer().write(data);
+		write(data, 0, data.length);
 	}
 
 	protected void write(byte[] data, int offset, int length) throws IOException {
-		ringBuffer.writer().write(data, offset, length);
+		try (OutputStream os = ringBuffer.writer()) {
+			os.write(data, offset, length);
+		}
 	}
 
 	protected final byte[] data(int size) {
@@ -362,4 +363,10 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		}
 		return res;
 	}
+
+	@Override
+	public String toString() {
+		return ringBuffer.toString();
+	}
+
 }

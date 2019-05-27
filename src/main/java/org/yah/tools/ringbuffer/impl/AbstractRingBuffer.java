@@ -2,32 +2,39 @@ package org.yah.tools.ringbuffer.impl;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InterruptedIOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.function.UnaryOperator;
 
 import org.yah.tools.ringbuffer.RingBuffer;
+import org.yah.tools.ringbuffer.UncheckedInterruptedException;
 
 /**
  * Abstract implementation of {@link RingBuffer}<br/>
  */
 public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 
+	public interface StateOperator {
+		RingBufferState udpateState(RingBufferState state) throws IOException;
+	}
+
 	private final int limit;
 
-	private RingBufferState state;
+	private volatile RingBufferState state;
 
 	private LinearBuffer linearBuffer;
 
 	private final List<RingBufferInputStream> inputStreams = new ArrayList<>();
 
-	private final Object writeMonitor = new Object();
+	private final Object writerMonitor = new Object();
+
+	private RingBufferOutputStream outputStream;
 
 	protected AbstractRingBuffer(int limit) {
 		this.limit = limit;
@@ -47,15 +54,36 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	}
 
 	@Override
-	public final RingBufferInputStream reader() {
-		RingBufferInputStream is = createInputStream();
-		addInputStream(is);
+	public synchronized InputStream reader() {
+		RingBufferInputStream is = new RingBufferInputStream(this);
+		inputStreams.add(is);
 		return is;
 	}
 
 	@Override
-	public final synchronized RingBufferOutputStream writer() {
-		return createOutputStream();
+	public OutputStream writer() {
+		synchronized (writerMonitor) {
+			while (outputStream != null) {
+				try {
+					writerMonitor.wait();
+				} catch (InterruptedException e) {
+					throw new UncheckedInterruptedException(e);
+				}
+			}
+			outputStream = new RingBufferOutputStream(this);
+			return outputStream;
+		}
+	}
+
+	protected void releaseWriter(RingBufferOutputStream outputStream) {
+		synchronized (writerMonitor) {
+			if (this.outputStream != outputStream) {
+				throw new IllegalStateException(outputStream + " does is not that current writer, "
+						+ this.outputStream);
+			}
+			this.outputStream = null;
+			writerMonitor.notify();
+		}
 	}
 
 	@Override
@@ -66,34 +94,16 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		return removed;
 	}
 
-	protected void write(byte[] source, int offset, int length) throws IOException {
-		write(source, offset, length, s -> s.incrementSize(length));
-	}
-
-	protected final void write(byte[] source, int offset, int length, UnaryOperator<RingBufferState> stateUpdater)
-			throws IOException {
-		synchronized (writeMonitor) {
-			RingBufferState state = ensureCapacity(length);
-			int writePosition = state.writePosition();
-			state.execute(writePosition, length, (p, l, o) -> linearBuffer.write(p, source, offset + o, l));
-			updateState(stateUpdater);
-		}
-	}
-
-	protected RingBufferInputStream createInputStream() {
-		return new RingBufferInputStream(this);
-	}
-
-	protected RingBufferOutputStream createOutputStream() {
-		return new RingBufferOutputStream(this);
-	}
-
-	protected final synchronized void addInputStream(RingBufferInputStream is) {
+	protected final void addInputStream(BufferedRingBufferInputStream is) {
 		inputStreams.add(is);
 	}
 
 	protected final synchronized void removeInputStream(RingBufferInputStream is) {
 		inputStreams.remove(is);
+	}
+
+	protected final synchronized void forEachInputStreams(Consumer<RingBufferInputStream> consumer) {
+		inputStreams.forEach(consumer);
 	}
 
 	@Override
@@ -119,9 +129,9 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		this.linearBuffer = linearBuffer;
 	}
 
-	protected final synchronized RingBufferState updateState(UnaryOperator<RingBufferState> operator)
+	protected final synchronized RingBufferState updateState(StateOperator operator)
 			throws IOException {
-		state = operator.apply(state);
+		state = operator.udpateState(state);
 		writeState(state);
 		notifyAll();
 		return state;
@@ -135,41 +145,91 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		return linearBuffer;
 	}
 
-	private RingBufferState ensureCapacity(int additional) throws IOException {
+	protected RingBufferState ensureCapacity(int additional) throws IOException {
 		// work with a state snapshot, it can change in time as follow:
 		// - no other writer, so no other capacity change
 		// - only concurrent read or remove:
 		// - size can only grow
 		// - write position will never change
-		RingBufferState state = state();
-		int available = availableToWrite(state);
+		RingBufferState fromState = state();
+		RingBufferState state = fromState;
+		int available = availableToWrite(fromState);
 		if (available < additional) {
 			int missing = additional - available;
-			int newCapacity = RingBufferUtils.nextPowerOfTwo(state.capacity() + missing);
+			int newCapacity = RingBufferUtils.nextPowerOfTwo(fromState.capacity() + missing);
 			if (inLimit(newCapacity)) {
+				// increase capacity
 				LinearBuffer newBuffer = allocate(newCapacity);
-				return transferTo(newBuffer, state);
+				transferTo(newBuffer, fromState);
+
+				synchronized (this) {
+					state = updateState(s -> s.updateCapacity(newCapacity, fromState));
+					linearBuffer = newBuffer;
+					inputStreams.forEach(is -> is.updateCapacity(newCapacity, fromState));
+				}
+			} else {
+				throw new RingBufferOverflowException(newCapacity, limit);
+				// return waitFor(this::state, s -> availableToWrite(s) >= additional);
 			}
-			return waitFor(this::state, s -> availableToWrite(s) >= additional);
 		}
 		return state;
 	}
 
-	private int availableToWrite(RingBufferState s) {
+	private int availableToWrite(RingBufferState state) {
 		if (limit > 0) {
 			// capacity can be over current limit for persistent buffer that have been
 			// reconfigured
-			return Math.min(limit, s.capacity()) - s.size();
+			return Math.min(limit, state.capacity()) - state.size();
 		}
-		return s.capacity() - s.size();
+		return state.capacity() - state.size();
 	}
 
 	@Override
 	public String toString() {
-		return String.format("%s [state=%s]", getClass().getSimpleName(), state);
+		StringBuilder sb = new StringBuilder();
+		sb.append(getClass().getSimpleName());
+		sb.append(" [capacity=").append(capacity());
+		if (limit > 0)
+			sb.append(", limit=").append(limit);
+		sb.append("]").append(System.lineSeparator());
+		int width = 80;
+		sb.append('|');
+		RingBufferState state = state();
+		if (state.isEmpty()) {
+			for (int i = 0; i < width; i++)
+				sb.append('-');
+		} else {
+			float factor = width / (float) state.capacity();
+			int readPos = (int) (state.position().position() * factor);
+			int writePos = (int) (state.writePosition() * factor) - 1;
+			if (writePos < 0)
+				writePos = width;
+			int i = 0;
+			if (state.wrapped()) {
+				for (; i < writePos; i++)
+					sb.append('#');
+				sb.append('>');
+				i++;
+				for (; i < readPos; i++)
+					sb.append('-');
+				for (; i < width; i++)
+					sb.append('#');
+			} else {
+				for (; i < readPos; i++)
+					sb.append('-');
+				for (; i < writePos; i++)
+					sb.append('#');
+				sb.append('>');
+				i++;
+				for (; i < width; i++)
+					sb.append('-');
+			}
+		}
+		sb.append('|');
+		return sb.toString();
 	}
 
-	protected RingBufferState transferTo(LinearBuffer target, RingBufferState fromState) throws IOException {
+	private void transferTo(LinearBuffer target, RingBufferState fromState) throws IOException {
 		int startPosition = fromState.position().position();
 		int writePosition = fromState.writePosition();
 		if (fromState.wrapped()) {
@@ -182,16 +242,6 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 			// direct copy, same position
 			linearBuffer.copyTo(target, startPosition, startPosition, fromState.size());
 		}
-
-		return updateState(s -> updateBuffer(s, target, fromState));
-	}
-
-	private RingBufferState updateBuffer(RingBufferState currentState, LinearBuffer target, RingBufferState fromState) {
-		int newCapacity = target.capacity();
-		RingBufferState newState = currentState.updateCapacity(newCapacity, fromState);
-		inputStreams.forEach(is -> is.updateCapacity(newCapacity, fromState));
-		linearBuffer = target;
-		return newState;
 	}
 
 	protected final synchronized <C> C waitFor(Supplier<C> contextSupplier,
@@ -204,8 +254,8 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 			Predicate<C> contextPredicate, long timeout, TimeUnit timeUnit)
 			throws InterruptedIOException {
 		C last = contextSupplier.get();
-		long remaining = timeUnit.toMillis(timeout);
-		long timeLimit = remaining > 0 ? System.currentTimeMillis() + remaining : 0;
+		long remaining = timeout > 0 ? timeUnit.toMillis(timeout) : Long.MAX_VALUE;
+		long timeLimit = remaining > 0 ? System.currentTimeMillis() + remaining : Long.MAX_VALUE;
 		while (!contextPredicate.test(last) && remaining > 0) {
 			try {
 				wait(remaining);
@@ -217,14 +267,6 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 			remaining = timeLimit - System.currentTimeMillis();
 		}
 		return contextPredicate.test(last) ? last : null;
-	}
-
-	protected final synchronized <V> Optional<V> convertIf(Predicate<RingBufferState> predicate,
-			Function<RingBufferState, V> converter) {
-		RingBufferState state = state();
-		if (predicate.test(state))
-			return Optional.of(converter.apply(state));
-		return Optional.empty();
 	}
 
 }
