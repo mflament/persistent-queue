@@ -19,6 +19,8 @@ import java.util.concurrent.CountDownLatch;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferClosedException;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferConcurrentModificationException;
 
 public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
@@ -193,7 +195,7 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		closeBuffer();
 
 		int messageSize = 36;
-		int messageCount = 5000;
+		int messageCount = 5_000;
 
 		ringBuffer = createFloodBuffer();
 
@@ -273,7 +275,7 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		}
 	}
 
-	@Test(expected = ConcurrentModificationException.class)
+	@Test(expected = RingBufferConcurrentModificationException.class)
 	public void test_concurrent_remove() throws IOException {
 		byte[] data = data(CAPACITY);
 		write(data, 0, CAPACITY);

@@ -36,9 +36,9 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 	public static final int DEFAULT_READER_CACHE = 4 * 1024;
 
-	private final int defaultReaderCache;
+	private final int readerCache;
 
-	private final int defaultWriteBufferSize;
+	private final int writeBufferSize;
 
 	private final int requestedCapacity;
 
@@ -51,9 +51,9 @@ public class FileRingBuffer extends AbstractRingBuffer {
 	private FileChannel fileChannel;
 
 	protected FileRingBuffer(Builder builder) throws IOException {
-		super(builder.limit);
-		this.defaultReaderCache = builder.readerCacheSize;
-		this.defaultWriteBufferSize = builder.defaultWriteBufferSize;
+		super(builder.limit, builder.writeTimeout);
+		this.readerCache = builder.readerCacheSize;
+		this.writeBufferSize = builder.writeBufferSize;
 		this.syncMode = builder.syncMode;
 		this.requestedCapacity = builder.capacity;
 		this.file = builder.file.toPath();
@@ -88,7 +88,7 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 	@Override
 	public OutputStream writer() {
-		return writer(defaultWriteBufferSize);
+		return writer(writeBufferSize);
 	}
 
 	public OutputStream writer(int bufferSize) {
@@ -99,12 +99,8 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 	@Override
 	public InputStream reader() {
-		return reader(defaultReaderCache);
-	}
-
-	public synchronized InputStream reader(int bufferSize) {
-		if (bufferSize > 0)
-			return new BufferedRingBufferInputStream((RingBufferInputStream) super.reader(), bufferSize);
+		if (readerCache > 0)
+			return new BufferedRingBufferInputStream((RingBufferInputStream) super.reader(), readerCache);
 		return super.reader();
 	}
 
@@ -262,9 +258,11 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 		private int readerCacheSize = 8 * 1024;
 
-		private int defaultWriteBufferSize = 4 * 1024;
+		private int writeBufferSize = 4 * 1024;
 
 		protected SyncMode syncMode = SyncMode.NONE;
+
+		private long writeTimeout = 0;
 
 		protected Builder() {}
 
@@ -292,13 +290,18 @@ public class FileRingBuffer extends AbstractRingBuffer {
 			return this;
 		}
 
-		public Builder withDefaultWriteBufferSize(int defaultWriteBufferSize) {
-			this.defaultWriteBufferSize = defaultWriteBufferSize;
+		public Builder withWriteBufferSize(int writeBufferSize) {
+			this.writeBufferSize = writeBufferSize;
 			return this;
 		}
 
 		public Builder withSyncMode(SyncMode syncMode) {
 			this.syncMode = syncMode;
+			return this;
+		}
+
+		public Builder withWriteTimeout(long writeTimeout) {
+			this.writeTimeout = writeTimeout;
 			return this;
 		}
 

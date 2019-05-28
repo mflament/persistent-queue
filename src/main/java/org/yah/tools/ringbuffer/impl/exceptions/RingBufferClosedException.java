@@ -1,4 +1,4 @@
-package org.yah.tools.ringbuffer.impl;
+package org.yah.tools.ringbuffer.impl.exceptions;
 
 import java.io.IOException;
 

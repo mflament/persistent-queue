@@ -10,8 +10,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.CountDownLatch;
 
-import org.yah.tools.ringbuffer.impl.RingBufferClosedException;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferClosedException;
 import org.yah.tools.ringbuffer.impl.file.FileRingBuffer.SyncMode;
 
 public class FileRingBufferBenchmark {

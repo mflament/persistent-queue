@@ -18,7 +18,7 @@ import org.yah.tools.ringbuffer.RingBuffer;
  * give a new one.
  * </p>
  */
-public class RingBufferOutputStream extends OutputStream {
+public final class RingBufferOutputStream extends OutputStream {
 
 	private final byte[] singleByte = new byte[1];
 

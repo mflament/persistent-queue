@@ -42,25 +42,26 @@ public class BufferedRingBufferInputStream extends InputStream {
 	}
 
 	@Override
-	public int read(byte[] target, int offset, int length) throws IOException {
+	public int read(byte[] target, final int offset, final int length) throws IOException {
 		int remaining = length;
+		int read = 0;
 		if (buffer.hasRemaining()) {
-			int available = Math.min(remaining, buffer.remaining());
+			int available = Math.min(length, buffer.remaining());
 			buffer.get(target, offset, available);
-			offset += available;
+			read += available;
 			remaining -= available;
 		}
 
 		if (remaining > buffer.capacity()) {
 			// still more than the buffer capacity, do no use buffer for the rest
-			offset += delegate.read(target, offset, remaining);
+			read += delegate.read(target, offset + read, remaining);
 		} else if (remaining > 0) {
 			// buffer all that we can and return what we can
 			int size = Math.min(fillBuffer(), remaining);
-			buffer.get(target, offset, size);
-			offset += size;
+			buffer.get(target, offset + read, size);
+			read += size;
 		}
-		return offset;
+		return read;
 	}
 
 	private int fillBuffer() throws IOException {

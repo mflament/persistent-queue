@@ -14,11 +14,11 @@ import org.yah.tools.ringbuffer.impl.RingBufferUtils;
 public class ArrayRingBuffer extends AbstractRingBuffer {
 
 	public ArrayRingBuffer(int capacity) throws IOException {
-		this(capacity, -1);
+		this(capacity, -1, 0);
 	}
 
-	public ArrayRingBuffer(int capacity, int limit) throws IOException {
-		super(limit);
+	public ArrayRingBuffer(int capacity, int limit, long writeTimeout) throws IOException {
+		super(limit, writeTimeout);
 		capacity = RingBufferUtils.nextPowerOfTwo(capacity);
 		if (limit > 0 && limit < capacity)
 			throw new IllegalArgumentException("capacity " + capacity + " is greater than limit " + limit);

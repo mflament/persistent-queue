@@ -3,19 +3,21 @@ package org.yah.tools.ringbuffer.impl;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InterruptedIOException;
 import java.io.OutputStream;
+import java.nio.BufferOverflowException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import org.yah.tools.ringbuffer.RingBuffer;
-import org.yah.tools.ringbuffer.UncheckedInterruptedException;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils.IOFunction;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferInterruptedException;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferOverflowException;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferTimeoutException;
+import org.yah.tools.ringbuffer.impl.exceptions.WaitForWriterInterruptedException;
 
 /**
  * Abstract implementation of {@link RingBuffer}<br/>
@@ -28,6 +30,15 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 
 	private final int limit;
 
+	/**
+	 * Time, in milliseconds, to wait for available space in ring buffer to write
+	 * data if limit is reached.<br/>
+	 * 0 means no wait and {@link BufferOverflowException} will be thrown
+	 * {@link Long#MAX_VALUE} means no timeout and wait indefinitely (until buffer
+	 * is closed or writer thread is interrupted)
+	 */
+	private final long writeTimeout;
+
 	private volatile RingBufferState state;
 
 	private LinearBuffer linearBuffer;
@@ -38,8 +49,9 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 
 	private RingBufferOutputStream outputStream;
 
-	protected AbstractRingBuffer(int limit) {
+	protected AbstractRingBuffer(int limit, long writeTimeout) {
 		this.limit = limit;
+		this.writeTimeout = writeTimeout;
 	}
 
 	public RingBufferState state() {
@@ -69,7 +81,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 				try {
 					writerMonitor.wait();
 				} catch (InterruptedException e) {
-					throw new UncheckedInterruptedException(e);
+					throw new WaitForWriterInterruptedException(e);
 				}
 			}
 			outputStream = new RingBufferOutputStream(this);
@@ -169,9 +181,11 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 					linearBuffer = newBuffer;
 					inputStreams.forEach(is -> is.updateCapacity(newCapacity, fromState));
 				}
+			} else if (writeTimeout > 0) {
+				return waitFor(this::state, s -> availableToWrite(s) >= additional, s -> s,
+						writeTimeout, TimeUnit.MILLISECONDS);
 			} else {
 				throw new RingBufferOverflowException(newCapacity, limit);
-				// return waitFor(this::state, s -> availableToWrite(s) >= additional);
 			}
 		}
 		return state;
@@ -204,32 +218,33 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	protected final synchronized <C, T> T waitFor(Supplier<C> contextSupplier,
 			Predicate<C> contextPredicate,
 			IOFunction<C, T> contextHandler)
-			throws TimeoutException, IOException {
+			throws IOException {
 		return waitFor(contextSupplier, contextPredicate, contextHandler, 0, TimeUnit.MILLISECONDS);
 	}
 
 	protected final synchronized <C, T> T waitFor(Supplier<C> contextSupplier,
 			Predicate<C> contextPredicate, IOFunction<C, T> contextHandler,
 			long timeout, TimeUnit timeUnit)
-			throws TimeoutException, IOException {
+			throws IOException {
+
 		C last = contextSupplier.get();
-		long remaining = timeout > 0 ? timeUnit.toMillis(timeout) : 1;
-		long timeLimit = remaining > 0 ? System.currentTimeMillis() + remaining : 0;
+		long remaining = timeout > 0 ? timeUnit.toMillis(timeout) : 0;
+		long timeLimit = System.currentTimeMillis() + remaining;
 		while (!contextPredicate.test(last) && remaining > 0) {
 			try {
-				wait(remaining);
+				wait(remaining == Long.MAX_VALUE ? 0 : remaining);
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
-				throw new InterruptedIOException();
+				throw new RingBufferInterruptedException(e);
 			}
 			last = contextSupplier.get();
-			if (timeout > 0)
+			if (remaining != Long.MAX_VALUE)
 				remaining = timeLimit - System.currentTimeMillis();
 		}
 		if (contextPredicate.test(last))
 			return contextHandler.apply(last);
 
-		throw new TimeoutException();
+		throw new RingBufferTimeoutException("timed out after " + timeout + " " + timeUnit);
 	}
 
 	@Override

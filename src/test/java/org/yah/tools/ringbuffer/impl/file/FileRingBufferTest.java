@@ -23,7 +23,7 @@ public class FileRingBufferTest extends AbstractRingBufferTest<FileRingBuffer> {
 		return FileRingBuffer.builder(ringBufferFile)
 			.withCapacity(capacity)
 			.withDefaultReaderCache(0)
-			.withDefaultWriteBufferSize(0)
+			.withWriteBufferSize(0)
 			.build();
 	}
 
@@ -34,8 +34,10 @@ public class FileRingBufferTest extends AbstractRingBufferTest<FileRingBuffer> {
 		return FileRingBuffer.builder(ringBufferFile)
 			.withCapacity(CAPACITY)
 			.withLimit(1024 * 1024)
-			.withDefaultReaderCache(4 * 1024)
-			.withDefaultWriteBufferSize(8 * 1024)
+			//.withDefaultReaderCache(4 * 1024)
+			.withDefaultReaderCache(0)
+			.withWriteBufferSize(8 * 1024)
+			.withWriteTimeout(Long.MAX_VALUE)
 			.build();
 	}
 

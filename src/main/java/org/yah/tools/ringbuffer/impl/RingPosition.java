@@ -150,4 +150,28 @@ public final class RingPosition {
 		}
 	}
 
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + capacity;
+		result = prime * result + (int) (cycle ^ (cycle >>> 32));
+		result = prime * result + position;
+		return result;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		RingPosition other = (RingPosition) obj;
+		return capacity == other.capacity &&
+				cycle == other.cycle &&
+				position == other.position;
+	}
+
 }
