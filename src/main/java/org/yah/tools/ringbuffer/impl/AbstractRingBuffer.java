@@ -49,6 +49,8 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 
 	private RingBufferOutputStream outputStream;
 
+	protected int pendingWrite;
+
 	protected AbstractRingBuffer(int limit, long writeTimeout) {
 		this.limit = limit;
 		this.writeTimeout = writeTimeout;
@@ -86,6 +88,21 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 			}
 			outputStream = new RingBufferOutputStream(this);
 			return outputStream;
+		}
+	}
+
+	protected final int pendingWrite() {
+		return pendingWrite;
+	}
+
+	protected final void addPendingWrite(int length) {
+		this.pendingWrite += length;
+	}
+
+	protected void flushWriter() throws IOException {
+		if (pendingWrite > 0) {
+			updateState(s -> s.incrementSize(pendingWrite));
+			pendingWrite = 0;
 		}
 	}
 
@@ -130,7 +147,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		notifyAll();
 	}
 
-	protected final int capacity() {
+	public final int capacity() {
 		return state.capacity();
 	}
 
@@ -143,7 +160,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		this.linearBuffer = linearBuffer;
 	}
 
-	protected final synchronized RingBufferState updateState(StateOperator operator)
+	public final synchronized RingBufferState updateState(StateOperator operator)
 			throws IOException {
 		state = operator.udpateState(state);
 		writeState(state);
@@ -159,7 +176,12 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		return linearBuffer;
 	}
 
-	protected RingBufferState ensureCapacity(int additional) throws IOException {
+	protected final RingPosition writePosition(int additional) throws IOException {
+		RingBufferState pos = ensureCapacity(pendingWrite + additional);
+		return pos.writePosition(pendingWrite);
+	}
+
+	private RingBufferState ensureCapacity(int additional) throws IOException {
 		// work with a state snapshot, it can change in time as follow:
 		// - no other writer, so no other capacity change
 		// - only concurrent read or remove:
@@ -207,7 +229,7 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 			// wrapped, copy end of buffer to other buffer at same position
 			linearBuffer.copyTo(target, startPosition, startPosition, fromState.capacity() - startPosition);
 			// since wrapped, transfer tail of ring from actual buffer start to new buffer
-			// end
+			// end this will make the buffer continuous
 			linearBuffer.copyTo(target, 0, fromState.capacity(), writePosition);
 		} else {
 			// direct copy, same position

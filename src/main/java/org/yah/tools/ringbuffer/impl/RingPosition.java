@@ -91,22 +91,12 @@ public final class RingPosition {
 
 	@Override
 	public String toString() {
-		return String.format("RingPosition [position=%s, cycle=%s, capacity=%s]", position, cycle, capacity);
+		return String.format("RingPosition [position=%d, cycle=%d, capacity=%d, abs pos=%d]", position,
+				cycle, capacity, cycle * capacity + position);
 	}
 
 	public RingPosition advance(int offset) {
-		if (Math.abs(offset) > capacity)
-			throw new IllegalArgumentException("offset can not exceed capacity (" + capacity + ")");
-		if (offset == 0)
-			return this;
-		int nextPos = wrap(position + offset);
-		long nextCycle = cycle;
-		if (offset < 0 && nextPos >= position) {
-			nextCycle--;
-		} else if (offset > 0 && nextPos <= position) {
-			nextCycle++;
-		}
-		return new RingPosition(nextPos, nextCycle, capacity);
+		return advance(offset, capacity);
 	}
 
 	public RingPosition withCapacity(int newCapacity) {
@@ -116,22 +106,14 @@ public final class RingPosition {
 	public RingPosition updateCapacity(int newCapacity, RingBufferState fromState) {
 		int offset = 0;
 		long nextCycle = cycle;
-		if (fromState.wrapped() && position < fromState.writePosition()) {
+		if (fromState.wrapped() && cycle == fromState.cycle() + 1 && position <= fromState.writePosition()) {
 			offset = fromState.capacity();
 			nextCycle--;
 		}
 		return new RingPosition(position + offset, nextCycle, newCapacity);
 	}
 
-	public RingPosition shrink(RingPosition from, int newCapacity) {
-		int nextPos = substract(from);
-		long nextCycle = from.cycle;
-		if (nextPos < 0)
-			nextCycle--;
-		return new RingPosition(nextPos, nextCycle, newCapacity);
-	}
-
-	public void execute(int position, int length, RingAction action) throws IOException {
+	public void execute(int length, RingAction action) throws IOException {
 		if (length > capacity)
 			throw new IllegalArgumentException("Invalid length " + length + ", current capacity " + capacity);
 		if (length < 0)
@@ -144,10 +126,28 @@ public final class RingPosition {
 			// wrapped
 			int tail = capacity - position;
 			action.apply(position, tail, 0);
-			action.apply(0, endPosition, tail);
+			if (endPosition > 0)
+				action.apply(0, endPosition, tail);
 		} else {
 			action.apply(position, length, 0);
 		}
+	}
+
+	private RingPosition advance(int offset, int newCapacity) {
+		if (Math.abs(offset) > capacity)
+			throw new IllegalArgumentException("offset can not exceed capacity (" + capacity + ")");
+
+		if (offset == 0)
+			return capacity == newCapacity ? this : new RingPosition(position, cycle, newCapacity);
+
+		int nextPos = wrap(position + offset);
+		long nextCycle = cycle;
+		if (offset < 0 && nextPos >= position) {
+			nextCycle--;
+		} else if (offset > 0 && nextPos <= position) {
+			nextCycle++;
+		}
+		return new RingPosition(nextPos, nextCycle, newCapacity);
 	}
 
 	@Override

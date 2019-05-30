@@ -63,6 +63,11 @@ public class BufferedRingBufferInputStream extends InputStream {
 		}
 		return read;
 	}
+	
+	@Override
+	public int available() throws IOException {
+		return buffer.remaining() + delegate.available();
+	}
 
 	private int fillBuffer() throws IOException {
 		int size = Math.min(delegate.available(), buffer.capacity());

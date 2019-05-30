@@ -14,28 +14,26 @@ import org.yah.tools.queue.ObjectQueue;
 
 public class PersistentObjectQueueTest {
 
-	private PersistentObjectQueue<String> createBuffer(boolean delete) throws IOException {
+	private PersistentObjectQueue<String> createQueue(boolean delete) throws IOException {
 		File file = new File("target/test/ring-buffers/object-buffer.dat");
 		if (!file.getParentFile().exists() && !file.getParentFile().mkdirs())
 			throw new IOException("Unable to create directory " + file.getParentFile());
 		if (delete && file.exists())
 			file.delete();
-		return PersistentObjectQueue.<String>builder()
-			.withFile(file)
-			.build();
+		return PersistentObjectQueue.<String>builder().withFile(file).build();
 	}
 
-	private PersistentObjectQueue<String> newBuffer() throws IOException {
-		return createBuffer(true);
+	private PersistentObjectQueue<String> newQueue() throws IOException {
+		return createQueue(true);
 	}
 
-	private ObjectQueue<String> loadBuffer() throws IOException {
-		return createBuffer(false);
+	private ObjectQueue<String> loadQueue() throws IOException {
+		return createQueue(false);
 	}
 
 	@Test
 	public void test_write() throws IOException {
-		try (ObjectQueue<String> buffer = newBuffer()) {
+		try (ObjectQueue<String> buffer = newQueue()) {
 			assertEquals(0, buffer.elementsCount());
 			buffer.offer(Collections.singleton("value"));
 			assertEquals(1, buffer.elementsCount());
@@ -46,12 +44,12 @@ public class PersistentObjectQueueTest {
 
 	@Test
 	public void test_write_persistency() throws IOException {
-		try (ObjectQueue<String> buffer = newBuffer()) {
+		try (ObjectQueue<String> buffer = newQueue()) {
 			buffer.offer(Collections.singleton("value"));
 			assertEquals(1, buffer.elementsCount());
 		}
 
-		try (ObjectQueue<String> buffer = loadBuffer()) {
+		try (ObjectQueue<String> buffer = loadQueue()) {
 			assertEquals(1, buffer.elementsCount());
 			String actual = buffer.poll();
 			assertEquals("value", actual);
@@ -59,8 +57,8 @@ public class PersistentObjectQueueTest {
 	}
 
 	@Test
-	public void test_poll() throws IOException {
-		try (ObjectQueue<String> buffer = newBuffer()) {
+	public void test_poll_autocommit() throws IOException {
+		try (ObjectQueue<String> buffer = newQueue()) {
 			buffer.offer(Arrays.asList("value1", "value2"));
 			assertEquals(2, buffer.elementsCount());
 
@@ -79,7 +77,7 @@ public class PersistentObjectQueueTest {
 
 	@Test
 	public void test_iterator() throws IOException {
-		try (PersistentObjectQueue<String> buffer = newBuffer()) {
+		try (PersistentObjectQueue<String> buffer = newQueue()) {
 			buffer.offer(Arrays.asList("value1", "value2", "value3"));
 			try (QueueCursor<String> cursor = buffer.cursor()) {
 				assertTrue(cursor.hasNext());

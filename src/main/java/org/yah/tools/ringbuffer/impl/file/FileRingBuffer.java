@@ -40,7 +40,7 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 	private final int writeBufferSize;
 
-	private final int requestedCapacity;
+	private final int requestedLimit;
 
 	private final Path file;
 
@@ -55,23 +55,28 @@ public class FileRingBuffer extends AbstractRingBuffer {
 		this.readerCache = builder.readerCacheSize;
 		this.writeBufferSize = builder.writeBufferSize;
 		this.syncMode = builder.syncMode;
-		this.requestedCapacity = builder.capacity;
+		this.requestedLimit = RingBufferUtils.nextPowerOfTwo(builder.limit);
 		this.file = builder.file.toPath();
 		this.fileChannel = openChannel();
 		headerBuffer = ByteBuffer.allocate(headerLength());
+
 		RingBufferState state = readState();
-		LinearBuffer linearBuffer = new FileLinearBuffer(state.capacity());
-		restore(state, linearBuffer);
+		// retrieve disk space if possible
+		state = shrink(state);
+
+		if (requestedLimit > state.capacity()) {
+			// capacity increased, transfer the end of ring buffer from start of file to end
+			// of file to keep buffer continuous
+			transferWrappedTail(state);
+			state = state.withCapacity(requestedLimit);
+		}
+		restore(state, new FileLinearBuffer());
 	}
 
-	public void shrink() throws IOException {
-		updateState(this::shrink);
-	}
-
-	protected RingBufferState readState() throws IOException {
+	private RingBufferState readState() throws IOException {
 		int channelSize = (int) fileChannel.size();
 		if (channelSize == 0) {
-			RingBufferState res = newState(requestedCapacity);
+			RingBufferState res = newState(requestedLimit);
 			writeState(res);
 			return res;
 		} else {
@@ -82,8 +87,8 @@ public class FileRingBuffer extends AbstractRingBuffer {
 		}
 	}
 
-	protected RingBufferState newState(int requestedCapacity) {
-		return new RingBufferState(requestedCapacity);
+	protected RingBufferState newState(int capacity) {
+		return new RingBufferState(capacity);
 	}
 
 	@Override
@@ -139,7 +144,7 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 	@Override
 	protected LinearBuffer allocate(int capacity) throws IOException {
-		return new FileLinearBuffer(capacity);
+		throw new UnsupportedOperationException();
 	}
 
 	private FileChannel openChannel() throws IOException {
@@ -157,19 +162,48 @@ public class FileRingBuffer extends AbstractRingBuffer {
 		}
 	}
 
+	/**
+	 * Resize the current buffer to the closest capacity matching it's size, not
+	 * lower to requested capacity.<br/>
+	 * The linear buffer is transfered to be continuous from 0 to size
+	 */
 	private RingBufferState shrink(RingBufferState state) throws IOException {
-		int required = Math.max(requestedCapacity, RingBufferUtils.nextPowerOfTwo(state.size()));
+		int required = Math.max(requestedLimit, RingBufferUtils.nextPowerOfTwo(state.size()));
 		if (required < state.capacity()) {
 			int position = state.position().position();
-			if (state.size() > 0 && position > 0)
+			if (state.size() > 0 && position > 0) {
+				// we have some data to copy
 				rewindBuffer(state);
+			}
 			fileChannel.truncate(headerLength() + required);
-			forEachInputStreams(is -> is.shrink(required, state));
 			return state.shrink(required);
 		}
 		return state;
 	}
 
+	private void transferWrappedTail(RingBufferState state) throws IOException {
+		if (state.wrapped()) {
+			int headerLength = headerLength();
+			long size = fileChannel.size();
+			int expectedSize = headerLength + state.capacity();
+			if (size != expectedSize) {
+				throw new IllegalStateException("Unexpected FileChannel size " + size + ", expecting " + expectedSize);
+			}
+			fileChannel.position(size);
+			int remaining = state.writePosition();
+			int transferred = 0;
+			while (remaining > 0) {
+				int t = (int) fileChannel.transferTo(headerLength + transferred, remaining, fileChannel);
+				remaining -= t;
+				transferred += t;
+			}
+		}
+	}
+
+	/**
+	 * Transfer the linear buffer content to the start of the linear buffer.<br/>
+	 * Use a temporary file to avoid losing data if something goes wrong.
+	 */
 	private void rewindBuffer(RingBufferState state) throws IOException {
 		int position = state.position().position();
 		Path tempFile = file.getParent().resolve(file.getFileName() + ".tmp");
@@ -178,35 +212,38 @@ public class FileRingBuffer extends AbstractRingBuffer {
 				StandardOpenOption.READ, StandardOpenOption.WRITE)) {
 
 			int headerLength = headerLength();
+			// copy the header
 			fileChannel.transferTo(0, headerLength, tempFileChannel);
 			if (state.wrapped()) {
+				// copy tail of linear buffer (start of ring buffer) to start of new linear
+				// buffer
 				fileChannel.transferTo(position + headerLength, state.capacity() - position, tempFileChannel);
+				// copy start of linear buffer (end of ring buffer) after start of ring buffer
 				fileChannel.transferTo(headerLength, state.writePosition(), tempFileChannel);
 			} else {
+				// copy linear buffer to start of new linear buffer
 				fileChannel.transferTo(position + headerLength, state.size(), tempFileChannel);
 			}
 		}
 
+		// close current file channel to delete move it
 		fileChannel.close();
+
+		// keep a back, simple rename is fast
 		Path backupFile = Files.move(file, file.getParent().resolve(file.getFileName() + ".bak"),
 				StandardCopyOption.REPLACE_EXISTING);
+
+		// rename the new created file to buffer file name
 		Files.move(tempFile, file);
+
+		// reopen the file channel
 		fileChannel = openChannel();
+
+		// all good, delete the backup file
 		Files.delete(backupFile);
 	}
 
 	public class FileLinearBuffer implements LinearBuffer {
-
-		private int capacity;
-
-		public FileLinearBuffer(int capacity) {
-			this.capacity = RingBufferUtils.nextPowerOfTwo(capacity);
-		}
-
-		@Override
-		public int capacity() {
-			return capacity;
-		}
 
 		@Override
 		public void read(int position, byte[] target, int offset, int length) throws IOException {
@@ -231,12 +268,7 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 		@Override
 		public void copyTo(LinearBuffer target, int position, int targetPosition, int length) throws IOException {
-			if (position == targetPosition)
-				return;
-
-			int headerLength = headerLength();
-			fileChannel.position(headerLength + targetPosition);
-			fileChannel.transferTo(headerLength + position, length, fileChannel);
+			throw new UnsupportedOperationException();
 		}
 	}
 
@@ -252,9 +284,7 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 		private File file = new File("queue.dat");
 
-		private int capacity = 128 * 1024;
-
-		private int limit = 5 * 1024 * 1024;
+		private int limit = 8 * 1024 * 1024;
 
 		private int readerCacheSize = 8 * 1024;
 
@@ -272,11 +302,6 @@ public class FileRingBuffer extends AbstractRingBuffer {
 
 		public Builder withFile(File file) {
 			this.file = file;
-			return this;
-		}
-
-		public Builder withCapacity(int capacity) {
-			this.capacity = capacity;
 			return this;
 		}
 

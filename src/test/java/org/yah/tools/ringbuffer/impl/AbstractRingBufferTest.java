@@ -3,7 +3,6 @@ package org.yah.tools.ringbuffer.impl;
 import static java.util.Arrays.copyOfRange;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -13,8 +12,11 @@ import java.io.UncheckedIOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
-import java.util.ConcurrentModificationException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.After;
 import org.junit.Before;
@@ -25,13 +27,12 @@ import org.yah.tools.ringbuffer.impl.exceptions.RingBufferConcurrentModification
 public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
 	protected static final int CAPACITY = 16;
-	protected static final int LIMIT = 64;
 
 	protected R ringBuffer;
 
 	@Before
-	public void setUp() throws Exception {
-		ringBuffer = createRingBuffer(CAPACITY, LIMIT);
+	public void setup() throws Exception {
+		ringBuffer = createRingBuffer(CAPACITY);
 	}
 
 	@After
@@ -41,20 +42,10 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
 	protected void closeBuffer() throws IOException {}
 
-	protected abstract R createRingBuffer(int capacity, int limit) throws IOException;
+	protected abstract R createRingBuffer(int capacity) throws IOException;
 
 	protected R createFloodBuffer() throws IOException {
-		return createRingBuffer(CAPACITY, 1024 * 1024);
-	}
-
-	@Test
-	public void testWrap() {
-		RingBufferState state = ringBuffer.state();
-		assertEquals(state.wrap(0), 0);
-		assertEquals(state.wrap(1), 1);
-		assertEquals(state.wrap(CAPACITY), 0);
-		assertEquals(state.wrap(CAPACITY + 1), 1);
-		assertEquals(state.wrap(-1), CAPACITY - 1);
+		return createRingBuffer(1024 * 1024);
 	}
 
 	@Test
@@ -191,39 +182,41 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 	}
 
 	@Test
-	public void test_concurrent_flood() throws IOException, InterruptedException, NoSuchAlgorithmException {
+	public void test_concurrent_flood() throws Exception {
+		ExecutorService executorService = Executors.newSingleThreadExecutor();
+		for (int i = 0; i < 10; i++) {
+			concurrentFlood(executorService);
+		}
+		executorService.shutdown();
+		System.out.println("Youpi");
+	}
+
+	private void concurrentFlood(ExecutorService executorService) throws IOException, InterruptedException,
+			NoSuchAlgorithmException, ExecutionException {
 		closeBuffer();
 
 		int messageSize = 36;
-		int messageCount = 5_000;
+		int messageCount = 10_000;
 
 		ringBuffer = createFloodBuffer();
 
 		byte[] data = data(messageSize);
 
-		MessageDigest readerDigest = MessageDigest.getInstance("SHA-1");
-		CountDownLatch closeLatch = new CountDownLatch(1);
-		Thread thread = new Thread(() -> {
+		Future<byte[]> future = executorService.submit(() -> {
+			MessageDigest readerDigest = MessageDigest.getInstance("SHA-1");
 			try (InputStream is = createReader()) {
 				int remaining = messageCount;
 				while (remaining > 0) {
 					byte[] msg = RingBufferUtils.readFully(is, messageSize);
 					if (!Arrays.equals(data, msg))
 						System.out.println("will fail");
-
 					readerDigest.update(msg);
 					remaining--;
 					ringBuffer.remove(messageSize);
 				}
-			} catch (RingBufferClosedException e) {
-				// ignore
-			} catch (Exception e) {
-				e.printStackTrace();
-			} finally {
-				closeLatch.countDown();
+				return readerDigest.digest();
 			}
 		});
-		thread.start();
 
 		MessageDigest writerDigest = MessageDigest.getInstance("SHA-1");
 		for (int i = 0; i < messageCount; i++) {
@@ -231,48 +224,10 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 			writerDigest.update(data);
 		}
 		byte[] expectedDigest = writerDigest.digest();
-
-		closeLatch.await();
-		ringBuffer.close();
-
-		byte[] actualDigest = readerDigest.digest();
+		byte[] actualDigest = future.get();
 		assertArrayEquals(expectedDigest, actualDigest);
-	}
 
-	@Test
-	public void testEnsureCapacity() throws IOException {
-		assertEquals(CAPACITY, ringBuffer.capacity());
-		write(data(CAPACITY + 1));
-		assertEquals(CAPACITY + 1, ringBuffer.size());
-		assertTrue(ringBuffer.capacity() > CAPACITY);
-	}
-
-	@Test
-	public void testEnsureCapacity_wrapped() throws IOException {
-		byte[] data = data(CAPACITY);
-
-		write(data);
-
-		ringBuffer.remove(CAPACITY / 2);
-
-		write(data);
-
-		assertTrue(ringBuffer.capacity() > CAPACITY);
-		assertEquals(CAPACITY + CAPACITY / 2, ringBuffer.size());
-
-		byte[] actual = new byte[CAPACITY];
-		try (InputStream is = createReader()) {
-			int read = is.read(actual, 0, CAPACITY / 2);
-			assertEquals(CAPACITY / 2, read);
-			assertArrayEquals(copyOfRange(data, CAPACITY / 2, CAPACITY), copyOfRange(actual, 0, CAPACITY / 2));
-
-			read = is.read(actual);
-			assertEquals(CAPACITY, read);
-			assertArrayEquals(data, actual);
-
-			read = is.read(actual);
-			assertEquals(0, read);
-		}
+		ringBuffer.close();
 	}
 
 	@Test(expected = RingBufferConcurrentModificationException.class)
@@ -286,44 +241,6 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 
 		ringBuffer.remove(CAPACITY / 2);
 		is.read();
-	}
-
-	@Test
-	public void test_resize_shift() throws IOException {
-		byte[] data = data(CAPACITY);
-		write(data, 0, CAPACITY);
-		ringBuffer.remove(CAPACITY / 2);
-
-		// wrap
-		write(data, 0, CAPACITY / 2);
-		ringBuffer.toString();
-		RingBufferInputStream is1 = (RingBufferInputStream) createReader();
-		is1.skip(CAPACITY / 2);
-		assertEquals(0, is1.ringPosition().position());
-		assertEquals(1, is1.ringPosition().cycle());
-
-		RingBufferInputStream is2 = (RingBufferInputStream) createReader();
-		is2.skip(CAPACITY / 2 + CAPACITY / 4);
-		assertEquals(CAPACITY / 4, is2.ringPosition().position());
-		assertEquals(1, is1.ringPosition().cycle());
-
-		RingBufferInputStream is3 = (RingBufferInputStream) createReader();
-		is3.skip(CAPACITY / 4);
-		assertEquals(CAPACITY / 2 + CAPACITY / 4, is3.ringPosition().position());
-		assertEquals(0, is3.ringPosition().cycle());
-
-		// resize
-		write(data, 0, CAPACITY / 2);
-		assertEquals(CAPACITY + CAPACITY / 2, ringBuffer.size());
-
-		assertEquals(CAPACITY, is1.ringPosition().position());
-		assertEquals(0, is1.ringPosition().cycle());
-
-		assertEquals(CAPACITY + CAPACITY / 4, is2.ringPosition().position());
-		assertEquals(0, is2.ringPosition().cycle());
-
-		assertEquals(CAPACITY / 2 + CAPACITY / 4, is3.ringPosition().position());
-		assertEquals(0, is3.ringPosition().cycle());
 	}
 
 	protected InputStream createReader() {

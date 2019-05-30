@@ -1,9 +1,5 @@
 package org.yah.tools.ringbuffer.impl;
 
-import java.io.IOException;
-
-import org.yah.tools.ringbuffer.impl.RingPosition.RingAction;
-
 public class RingBufferState {
 
 	protected final RingPosition position;
@@ -97,10 +93,6 @@ public class RingBufferState {
 
 	public int wrap(int position) {
 		return this.position.wrap(position);
-	}
-
-	public void execute(int position, int length, RingAction action) throws IOException {
-		this.position.execute(position, length, action);
 	}
 
 	public RingBufferState shrink(int newCapacity) {

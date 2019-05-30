@@ -22,9 +22,7 @@ public final class RingBufferOutputStream extends OutputStream {
 
 	private final byte[] singleByte = new byte[1];
 
-	private final AbstractRingBuffer ringBuffer;
-
-	private int pending;
+	protected final AbstractRingBuffer ringBuffer;
 
 	public RingBufferOutputStream(AbstractRingBuffer ringBuffer) {
 		this.ringBuffer = ringBuffer;
@@ -42,20 +40,16 @@ public final class RingBufferOutputStream extends OutputStream {
 			return;
 		RingBufferUtils.validateBufferParams(source, offset, length);
 
-		RingBufferState state = ringBuffer.ensureCapacity(pending + length);
-		RingPosition writePosition = state.writePosition(pending);
+		RingPosition writePosition = ringBuffer.writePosition(length);
 		LinearBuffer linearBuffer = ringBuffer.linearBuffer();
-		state.execute(writePosition.position(), length, (p, l, o) -> linearBuffer.write(p, source, offset + o, l));
+		writePosition.execute(length, (p, l, o) -> linearBuffer.write(p, source, offset + o, l));
 
-		pending += length;
+		ringBuffer.addPendingWrite(length);
 	}
 
 	@Override
 	public void flush() throws IOException {
-		if (pending > 0) {
-			ringBuffer.updateState(s -> s.incrementSize(pending));
-			pending = 0;
-		}
+		ringBuffer.flushWriter();
 	}
 
 	@Override
@@ -66,7 +60,8 @@ public final class RingBufferOutputStream extends OutputStream {
 
 	@Override
 	public String toString() {
-		return String.format("RingBufferOutputStream [ringBuffer=%s, pending=%s]", ringBuffer, pending);
+		return String.format("RingBufferOutputStream [ringBuffer=%s, pending=%s]", ringBuffer,
+				ringBuffer.pendingWrite());
 	}
 
 }

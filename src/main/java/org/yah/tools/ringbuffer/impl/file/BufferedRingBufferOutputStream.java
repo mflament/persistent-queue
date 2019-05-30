@@ -54,6 +54,7 @@ public class BufferedRingBufferOutputStream extends OutputStream {
 	@Override
 	public void flush() throws IOException {
 		flushBuffer();
+		ringBufferStream.flush();
 	}
 
 	@Override

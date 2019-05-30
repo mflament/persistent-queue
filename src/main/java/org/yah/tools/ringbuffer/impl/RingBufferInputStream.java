@@ -5,6 +5,8 @@ import java.io.InputStream;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils.IOFunction;
 import org.yah.tools.ringbuffer.impl.exceptions.RingBufferClosedException;
 import org.yah.tools.ringbuffer.impl.exceptions.RingBufferConcurrentModificationException;
@@ -18,6 +20,8 @@ import org.yah.tools.ringbuffer.impl.exceptions.RingBufferConcurrentModification
  */
 public final class RingBufferInputStream extends InputStream {
 
+	private static final Logger LOGGER = LoggerFactory.getLogger(RingBufferInputStream.class);
+
 	private final byte[] singleByte = new byte[1];
 
 	private final AbstractRingBuffer ringBuffer;
@@ -25,8 +29,6 @@ public final class RingBufferInputStream extends InputStream {
 	private RingPosition ringPosition;
 
 	private boolean closed;
-
-	private ReadSnapshot lastSnapshot;
 
 	public RingBufferInputStream(AbstractRingBuffer ringBuffer) {
 		this.ringBuffer = ringBuffer;
@@ -108,7 +110,6 @@ public final class RingBufferInputStream extends InputStream {
 				break;
 
 			snapshot.read(target, offset, read);
-			lastSnapshot = snapshot;
 		} while (!advance(snapshot, read));
 		return read;
 	}
@@ -138,15 +139,16 @@ public final class RingBufferInputStream extends InputStream {
 			ReadSnapshot actualSnapshot = snapshot();
 
 			if (actualSnapshot.state.position.after(snapshot.position)) {
-				// We have read some data that are now removed, no need to try again
+				// We have read some data that are now removed, no need to try again, it's a
+				// failed
 				throw new RingBufferConcurrentModificationException(snapshot.toString());
 			}
 
-			if (snapshot.position.position() != actualSnapshot.position.position()) {
+			if (isStale(snapshot, actualSnapshot, length)) {
 				// Our ring position was changed by a concurrent writer who needed some space
 				// and triggered a capacity grow
 				// We have potentially read some invalid data, try again
-				System.out.println("concurrent resize from " + snapshot + " to " + actualSnapshot);
+				LOGGER.trace("concurrent resize from {} to {}", snapshot, actualSnapshot);
 				return false;
 			}
 
@@ -156,12 +158,23 @@ public final class RingBufferInputStream extends InputStream {
 		}
 	}
 
-	public void updateCapacity(int newCapacity, RingBufferState fromState) {
-		ringPosition = ringPosition.updateCapacity(newCapacity, fromState);
+	/**
+	 * if a snapshot has potentially been updated by another writer, return true
+	 * 
+	 * @param length
+	 */
+	private boolean isStale(ReadSnapshot snapshot, ReadSnapshot actualSnapshot, int length) {
+		if (snapshot.state.capacity() != actualSnapshot.state.capacity() && snapshot.state.wrapped()) {
+			// capacity changed on wrapped buffer, check if we were in the 'conflicting'
+			// zone (start of the original buffer that have been moved to the end)
+			int endPosition = snapshot.position.wrap(snapshot.position.position() + length);
+			return endPosition >= 0 && endPosition <= snapshot.state.writePosition();
+		}
+		return false;
 	}
 
-	public void shrink(int newCapacity, RingBufferState fromState) {
-		ringPosition = ringPosition.shrink(fromState.position(), newCapacity);
+	public void updateCapacity(int newCapacity, RingBufferState fromState) {
+		ringPosition = ringPosition.updateCapacity(newCapacity, fromState);
 	}
 
 	private ReadSnapshot snapshot() {
@@ -198,7 +211,7 @@ public final class RingBufferInputStream extends InputStream {
 		}
 
 		private void read(byte[] target, int offset, int length) throws IOException {
-			state.execute(position.position(), length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
+			position.execute(length, (p, l, o) -> linearBuffer.read(p, target, offset + o, l));
 		}
 
 		public int available() {

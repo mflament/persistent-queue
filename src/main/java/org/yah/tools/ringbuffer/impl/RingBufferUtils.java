@@ -51,7 +51,7 @@ public final class RingBufferUtils {
 		validateBufferParams(dst, offset, length);
 		int read = 0, remaining = length;
 		while (remaining > 0) {
-			int c = is.read(dst, read, remaining);
+			int c = is.read(dst, offset + read, remaining);
 			if (c < 0)
 				throw new EOFException();
 			read += c;

@@ -39,11 +39,6 @@ public class ArrayRingBuffer extends AbstractRingBuffer {
 		}
 
 		@Override
-		public int capacity() {
-			return buffer.length;
-		}
-
-		@Override
 		public void read(int position, byte[] target, int offset, int length) {
 			System.arraycopy(buffer, position, target, offset, length);
 		}

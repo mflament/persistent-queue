@@ -29,7 +29,6 @@ public class FileRingBufferBenchmark {
 		if (file.exists())
 			file.delete();
 		return FileRingBuffer.builder(file)
-			.withCapacity(capacity)
 			.withLimit(limit)
 			.withDefaultReaderCache(readerCache)
 			.withSyncMode(SyncMode.NONE)

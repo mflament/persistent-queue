@@ -5,6 +5,7 @@ import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.nio.IntBuffer;
@@ -16,7 +17,6 @@ import java.util.Objects;
 
 import org.yah.tools.queue.ObjectQueue;
 import org.yah.tools.queue.impl.converters.SerializableConverter;
-import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
 import org.yah.tools.ringbuffer.impl.RingBufferState;
 import org.yah.tools.ringbuffer.impl.RingPosition;
 import org.yah.tools.ringbuffer.impl.file.FileRingBuffer;
@@ -24,7 +24,7 @@ import org.yah.tools.ringbuffer.impl.file.FileRingBuffer.SyncMode;
 
 public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 
-	private final ObjectFileRingBuffer fileBuffer;
+	private final ObjectFileRingBuffer<E> fileBuffer;
 
 	private final ObjectConverter<E> converter;
 
@@ -32,20 +32,14 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 
 	private final CappedInputStream cappedInputStream;
 
-	private final int writeBufferSize;
-
-	private final boolean autoCommit;
-
 	private int lastElementSize;
 
 	private PersistentObjectQueue(Builder<E> builder)
 			throws IOException {
-		this.fileBuffer = new ObjectFileRingBuffer(builder.fileBufferBuilder);
 		this.converter = builder.converter;
-		this.writeBufferSize = builder.writeBufferSize;
+		this.fileBuffer = new ObjectFileRingBuffer<>(builder.fileBufferBuilder, converter);
 		this.elementInputStream = fileBuffer.reader();
 		this.cappedInputStream = new CappedInputStream(elementInputStream);
-		this.autoCommit = builder.autoCommit;
 	}
 
 	@Override
@@ -67,8 +61,7 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 	 */
 	@Override
 	public E poll() throws IOException {
-		if (autoCommit)
-			commit();
+		commit();
 		lastElementSize = readInt(elementInputStream);
 		return readElement(cappedInputStream, lastElementSize);
 	}
@@ -107,11 +100,10 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 
 	@Override
 	public void offer(Iterator<E> elements) throws IOException {
-		try (WriteBuffer<E> writeBuffer = new WriteBuffer<>(converter, writeBufferSize)) {
-			elements.forEach(writeBuffer::write);
-			fileBuffer.write(writeBuffer);
-		} catch (UncheckedIOException e) {
-			throw e.getCause();
+		try (OutputStream outputStream = fileBuffer.writer()) {
+			while (elements.hasNext()) {
+				fileBuffer.writeElement(elements.next(), outputStream);
+			}
 		}
 	}
 
@@ -122,10 +114,6 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 			throw new IOException("remaining element data " + is.remaining());
 		is.unlimit();
 		return element;
-	}
-
-	public void shrink() throws IOException {
-		fileBuffer.shrink();
 	}
 
 	private ObjectRingBufferState state() {
@@ -161,51 +149,6 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 		return res;
 	}
 
-	private static class WriteBuffer<E> extends ByteArrayOutputStream {
-
-		private final ObjectConverter<E> converter;
-
-		private int elementCount;
-
-		public WriteBuffer(ObjectConverter<E> converter, int size) {
-			super(size);
-			this.converter = converter;
-		}
-
-		public byte[] buffer() {
-			return buf;
-		}
-
-		public final int write(E element) throws IOException {
-			skip(Integer.BYTES);
-			int position = size();
-			converter.write(element, this);
-			int elementSize = size() - position;
-			writeInt(position - Integer.BYTES, elementSize);
-			elementCount++;
-			return elementSize;
-		}
-
-		private void writeInt(int index, int i) {
-			buf[index] = (byte) (i >> 24);
-			buf[index + 1] = (byte) (i >> 16);
-			buf[index + 2] = (byte) (i >> 8);
-			buf[index + 3] = (byte) i;
-		}
-
-		private void skip(int n) {
-			for (int i = 0; i < n; i++)
-				write(0);
-		}
-
-		@Override
-		public synchronized void reset() {
-			super.reset();
-			elementCount = 0;
-		}
-
-	}
-
 	private final class QueueIterator implements QueueCursor<E> {
 
 		private final CappedInputStream is;
@@ -215,8 +158,7 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 		private int elementsCount;
 
 		public QueueIterator() {
-			RingBufferInputStream reader = fileBuffer.reader();
-			is = new CappedInputStream(reader);
+			is = new CappedInputStream(fileBuffer.reader());
 		}
 
 		@Override
@@ -280,30 +222,27 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 			return new ObjectRingBufferState(position, cycle, capacity, size, elements);
 		}
 
-		protected final RingBufferState incrementSize(int length, int count) {
-			return new ObjectRingBufferState(position,
-					size() + length,
-					elements + count);
+		public RingBufferState remove(int length, int count) {
+			return new ObjectRingBufferState(remove(length), elements - count);
 		}
 
-		public RingBufferState remove(int length, int count) {
-			return new ObjectRingBufferState(remove(length),
-					elements - count);
+		public RingBufferState add(int length, int count) {
+			return new ObjectRingBufferState(incrementSize(length), elements + count);
 		}
 
 	}
 
-	private static class ObjectFileRingBuffer extends FileRingBuffer {
+	static class ObjectFileRingBuffer<E> extends FileRingBuffer {
 
 		private static final int HEADER_LENGTH = 4 * Integer.BYTES;
 
-		public ObjectFileRingBuffer(Builder builder) throws IOException {
-			super(builder);
-		}
+		private final ElementBuffer<E> elementBuffer;
 
-		public void write(WriteBuffer<?> writeBuffer) throws IOException {
-			super.write(writeBuffer.buffer(), 0, writeBuffer.size(),
-					s -> incrementSize(s, writeBuffer.size(), writeBuffer.elementCount));
+		private int pendingElements;
+
+		public ObjectFileRingBuffer(Builder builder, ObjectConverter<E> converter) throws IOException {
+			super(builder);
+			this.elementBuffer = new ElementBuffer<>(converter);
 		}
 
 		public synchronized int remove(int length, int count) throws IOException {
@@ -318,11 +257,6 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 		private RingBufferState remove(RingBufferState state, int length, int count) {
 			ObjectRingBufferState orbs = (ObjectRingBufferState) state;
 			return orbs.remove(length, count);
-		}
-
-		private RingBufferState incrementSize(RingBufferState state, int length, int count) {
-			ObjectRingBufferState orbs = (ObjectRingBufferState) state;
-			return orbs.incrementSize(length, count);
 		}
 
 		@Override
@@ -346,6 +280,20 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 			intBuffer.put(os.elements);
 		}
 
+		public void writeElement(E element, OutputStream outputStream) throws IOException {
+			elementBuffer.write(element, outputStream);
+			pendingElements++;
+		}
+
+		@Override
+		protected void flushWriter() throws IOException {
+			if (pendingElements > 0) {
+				updateState(s -> ((ObjectRingBufferState) s).add(pendingWrite(), pendingElements));
+				pendingElements = 0;
+				pendingWrite = 0;
+			}
+		}
+
 		@Override
 		protected int headerLength() {
 			return HEADER_LENGTH;
@@ -353,52 +301,68 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 
 	}
 
+	private static class ElementBuffer<E> extends ByteArrayOutputStream {
+
+		private final ObjectConverter<E> converter;
+
+		public ElementBuffer(ObjectConverter<E> converter) {
+			super(1024);
+			this.converter = converter;
+		}
+
+		public final void write(E element, OutputStream target) throws IOException {
+			converter.write(element, this);
+			int elementSize = size();
+			writeInt(elementSize, target);
+			target.write(buf, 0, elementSize);
+			reset();
+		}
+
+		private void writeInt(int i, OutputStream os) throws IOException {
+			os.write((i >> 24) & 0xFF);
+			os.write((byte) (i >> 16) & 0xFF);
+			os.write((byte) (i >> 8) & 0xFF);
+			os.write((byte) i & 0xFF);
+		}
+	}
+
 	public static final class Builder<E> {
 
 		private final ObjectConverter<E> converter;
 
-		private int writeBufferSize = 8 * 1024;
-
 		private FileRingBuffer.Builder fileBufferBuilder = FileRingBuffer.builder();
-
-		private boolean autoCommit;
 
 		private Builder(ObjectConverter<E> converter) {
 			this.converter = Objects.requireNonNull(converter, "converter is null");
 		}
 
 		public Builder<E> withFile(File file) {
-			fileBufferBuilder.withFile(file);
-			return this;
-		}
-
-		public Builder<E> withCapacity(int capacity) {
-			fileBufferBuilder.withCapacity(capacity);
+			fileBufferBuilder = fileBufferBuilder.withFile(file);
 			return this;
 		}
 
 		public Builder<E> withLimit(int limit) {
-			fileBufferBuilder.withLimit(limit);
+			fileBufferBuilder = fileBufferBuilder.withLimit(limit);
 			return this;
 		}
 
 		public Builder<E> withDefaultReaderCache(int defaultReaderCache) {
-			fileBufferBuilder.withDefaultReaderCache(defaultReaderCache);
+			fileBufferBuilder = fileBufferBuilder.withDefaultReaderCache(defaultReaderCache);
 			return this;
 		}
 
 		public Builder<E> withSyncMode(SyncMode syncMode) {
-			fileBufferBuilder.withSyncMode(syncMode);
+			fileBufferBuilder = fileBufferBuilder.withSyncMode(syncMode);
 			return this;
 		}
 
 		public Builder<E> withWriteBufferSize(int writeBufferSize) {
-			this.writeBufferSize = writeBufferSize;
+			fileBufferBuilder = fileBufferBuilder.withWriteBufferSize(writeBufferSize);
 			return this;
 		}
 
-		public Builder<E> autoCommit() {
-			this.autoCommit = true;
+		public Builder<E> withWriteTimeout(long writeTimeout) {
+			fileBufferBuilder = fileBufferBuilder.withWriteTimeout(writeTimeout);
 			return this;
 		}
 
