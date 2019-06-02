@@ -9,11 +9,11 @@ import java.io.InputStream;
 import java.util.Arrays;
 
 import org.junit.Test;
-import org.yah.tools.ringbuffer.impl.AbstractRingBufferTest;
+import org.yah.tools.ringbuffer.impl.AbstractStreamRingBufferTest;
 import org.yah.tools.ringbuffer.impl.RingBufferState;
 import org.yah.tools.ringbuffer.impl.file.FileRingBuffer;
 
-public class FileRingBufferTest extends AbstractRingBufferTest<FileRingBuffer> {
+public class FileRingBufferTest extends AbstractStreamRingBufferTest<FileRingBuffer> {
 
 	private File ringBufferFile = new File("target/test/ring-buffers/test-ring-buffer.dat");
 
@@ -41,9 +41,7 @@ public class FileRingBufferTest extends AbstractRingBufferTest<FileRingBuffer> {
 		return FileRingBuffer.builder(ringBufferFile)
 			.withLimit(1024 * 1024)
 			.withDefaultReaderCache(4 * 1024)
-			//.withDefaultReaderCache(0)
-			.withWriteBufferSize(8 * 1024)
-			//.withWriteBufferSize(0)
+			.withWriteBufferSize(4 * 1024)
 			.withWriteTimeout(Long.MAX_VALUE)
 			.build();
 	}

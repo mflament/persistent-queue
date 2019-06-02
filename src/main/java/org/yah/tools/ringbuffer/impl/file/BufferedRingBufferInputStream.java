@@ -6,12 +6,17 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 
 import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
+import org.yah.tools.ringbuffer.impl.RingBufferInputStream.ReadSnapshot;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferClosedException;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferConcurrentModificationException;
 
 public class BufferedRingBufferInputStream extends InputStream {
 
 	private final ByteBuffer buffer;
 
 	private final RingBufferInputStream delegate;
+
+	private boolean closed;
 
 	public BufferedRingBufferInputStream(RingBufferInputStream delegate, int bufferSize) {
 		this.delegate = Objects.requireNonNull(delegate, "delegate is null");
@@ -21,11 +26,17 @@ public class BufferedRingBufferInputStream extends InputStream {
 
 	@Override
 	public int read() throws IOException {
-		while (!buffer.hasRemaining()) {
-			delegate.awaitInput(s -> s);
+		while (!closed && !buffer.hasRemaining()) {
+			ReadSnapshot snapshot = delegate.awaitInput(s -> s);
+			if (snapshot.available() < 0)
+				throw new RingBufferConcurrentModificationException(snapshot.toString());
 			fillBuffer();
 		}
-		return buffer.get();
+		
+		if (closed)
+			throw new RingBufferClosedException();
+		
+		return buffer.get() & 0xFF;
 	}
 
 	@Override
@@ -80,4 +91,9 @@ public class BufferedRingBufferInputStream extends InputStream {
 		buffer.rewind().limit(0);
 	}
 
+	@Override
+	public void close() throws IOException {
+		delegate.close();
+		closed = true;
+	}
 }

@@ -24,7 +24,7 @@ import org.junit.Test;
 import org.yah.tools.ringbuffer.impl.exceptions.RingBufferClosedException;
 import org.yah.tools.ringbuffer.impl.exceptions.RingBufferConcurrentModificationException;
 
-public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
+public abstract class AbstractStreamRingBufferTest<R extends AbstractStreamRingBuffer> {
 
 	protected static final int CAPACITY = 16;
 
@@ -184,11 +184,10 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 	@Test
 	public void test_concurrent_flood() throws Exception {
 		ExecutorService executorService = Executors.newSingleThreadExecutor();
-		for (int i = 0; i < 10; i++) {
+		for (int i = 0; i < 20; i++) {
 			concurrentFlood(executorService);
 		}
 		executorService.shutdown();
-		System.out.println("Youpi");
 	}
 
 	private void concurrentFlood(ExecutorService executorService) throws IOException, InterruptedException,
@@ -243,7 +242,7 @@ public abstract class AbstractRingBufferTest<R extends AbstractRingBuffer> {
 		is.read();
 	}
 
-	protected InputStream createReader() {
+	protected InputStream createReader() throws IOException {
 		return ringBuffer.reader();
 	}
 

@@ -16,13 +16,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import org.yah.tools.ringbuffer.impl.AbstractRingBuffer;
+import org.yah.tools.ringbuffer.impl.AbstractStreamRingBuffer;
 import org.yah.tools.ringbuffer.impl.LinearBuffer;
-import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
 import org.yah.tools.ringbuffer.impl.RingBufferState;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils;
 
-public class FileRingBuffer extends AbstractRingBuffer {
+public class FileRingBuffer extends AbstractStreamRingBuffer {
 
 	private static final int HEADER_LENGTH = 3 * Integer.BYTES;
 
@@ -92,21 +91,17 @@ public class FileRingBuffer extends AbstractRingBuffer {
 	}
 
 	@Override
-	public OutputStream writer() {
-		return writer(writeBufferSize);
-	}
-
-	public OutputStream writer(int bufferSize) {
-		if (bufferSize > 0)
-			return new BufferedRingBufferOutputStream(super::writer, bufferSize);
-		return super.writer();
+	public OutputStream writer() throws IOException {
+		if (writeBufferSize > 0)
+			return new BufferedRingBufferOutputStream(() -> super.createWriter(), writeBufferSize);
+		return super.createWriter();
 	}
 
 	@Override
-	public InputStream reader() {
+	public InputStream reader() throws IOException {
 		if (readerCache > 0)
-			return new BufferedRingBufferInputStream((RingBufferInputStream) super.reader(), readerCache);
-		return super.reader();
+			return new BufferedRingBufferInputStream(super.createReader(), readerCache);
+		return super.createReader();
 	}
 
 	@Override

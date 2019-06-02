@@ -1,15 +1,9 @@
 package org.yah.tools.ringbuffer.impl.exceptions;
 
-import java.io.IOException;
+import java.io.InterruptedIOException;
 
-public class RingBufferInterruptedException extends IOException {
+public class RingBufferInterruptedException extends InterruptedIOException {
 
-	public RingBufferInterruptedException(InterruptedException cause) {
-		super(cause);
-	}
+	public RingBufferInterruptedException() {}
 
-	@Override
-	public synchronized InterruptedException getCause() {
-		return (InterruptedException) super.getCause();
-	}
 }

@@ -2,22 +2,22 @@ package org.yah.tools.ringbuffer.impl.array;
 
 import java.io.IOException;
 
-import org.yah.tools.ringbuffer.RingBuffer;
-import org.yah.tools.ringbuffer.impl.AbstractRingBuffer;
+import org.yah.tools.ringbuffer.StreamRingBuffer;
+import org.yah.tools.ringbuffer.impl.AbstractStreamRingBuffer;
 import org.yah.tools.ringbuffer.impl.LinearBuffer;
 import org.yah.tools.ringbuffer.impl.RingBufferState;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils;
 
 /**
- * In memory with byte[] implementation of {@link RingBuffer}
+ * In memory with byte[] implementation of {@link StreamRingBuffer}
  */
-public class ArrayRingBuffer extends AbstractRingBuffer {
+public class ArrayStreamRingBuffer extends AbstractStreamRingBuffer {
 
-	public ArrayRingBuffer(int capacity) throws IOException {
+	public ArrayStreamRingBuffer(int capacity) throws IOException {
 		this(capacity, -1, 0);
 	}
 
-	public ArrayRingBuffer(int capacity, int limit, long writeTimeout) throws IOException {
+	public ArrayStreamRingBuffer(int capacity, int limit, long writeTimeout) throws IOException {
 		super(limit, writeTimeout);
 		capacity = RingBufferUtils.nextPowerOfTwo(capacity);
 		if (limit > 0 && limit < capacity)

@@ -3,7 +3,6 @@ package org.yah.tools.ringbuffer.impl.file;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
-import java.util.function.Supplier;
 
 import org.yah.tools.ringbuffer.impl.RingBufferOutputStream;
 
@@ -13,15 +12,19 @@ import org.yah.tools.ringbuffer.impl.RingBufferOutputStream;
  */
 public class BufferedRingBufferOutputStream extends OutputStream {
 
+	public interface WriterSupplier {
+		RingBufferOutputStream get() throws IOException;
+	}
+
 	private final byte[] singleByte = new byte[1];
 
-	private final Supplier<OutputStream> delegateProvider;
+	private final WriterSupplier delegateProvider;
 
 	private final ByteBuffer buffer;
 
-	private OutputStream ringBufferStream;
+	private RingBufferOutputStream ringBufferStream;
 
-	public BufferedRingBufferOutputStream(Supplier<OutputStream> delegateProvider, int bufferSize) {
+	public BufferedRingBufferOutputStream(WriterSupplier delegateProvider, int bufferSize) {
 		this.delegateProvider = delegateProvider;
 		this.buffer = ByteBuffer.allocate(bufferSize);
 	}

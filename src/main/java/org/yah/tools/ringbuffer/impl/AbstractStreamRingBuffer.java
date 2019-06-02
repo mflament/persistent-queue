@@ -8,21 +8,20 @@ import java.nio.BufferOverflowException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
-import org.yah.tools.ringbuffer.RingBuffer;
+import org.yah.tools.ringbuffer.StreamRingBuffer;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils.IOFunction;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferClosedException;
 import org.yah.tools.ringbuffer.impl.exceptions.RingBufferInterruptedException;
 import org.yah.tools.ringbuffer.impl.exceptions.RingBufferOverflowException;
 import org.yah.tools.ringbuffer.impl.exceptions.RingBufferTimeoutException;
-import org.yah.tools.ringbuffer.impl.exceptions.WaitForWriterInterruptedException;
 
 /**
- * Abstract implementation of {@link RingBuffer}<br/>
+ * Abstract implementation of {@link StreamRingBuffer}<br/>
  */
-public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
+public abstract class AbstractStreamRingBuffer implements StreamRingBuffer, Closeable {
 
 	public interface StateOperator {
 		RingBufferState udpateState(RingBufferState state) throws IOException;
@@ -33,9 +32,13 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	/**
 	 * Time, in milliseconds, to wait for available space in ring buffer to write
 	 * data if limit is reached.<br/>
-	 * 0 means no wait and {@link BufferOverflowException} will be thrown
-	 * {@link Long#MAX_VALUE} means no timeout and wait indefinitely (until buffer
-	 * is closed or writer thread is interrupted)
+	 * <ul>
+	 * <li>if < 0 : no wait and {@link BufferOverflowException} will be thrown</li>
+	 * <li>if == 0 : means no timeout and wait indefinitely (until buffer is closed
+	 * or writer thread is interrupted)</li>
+	 * <li>else wait for the specified timeout befere throwing an
+	 * {@link RingBufferTimeoutException}</li>
+	 * </ul>
 	 */
 	private final long writeTimeout;
 
@@ -51,7 +54,11 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 
 	protected int pendingWrite;
 
-	protected AbstractRingBuffer(int limit, long writeTimeout) {
+	protected boolean closeRequested;
+
+	private boolean closed;
+
+	protected AbstractStreamRingBuffer(int limit, long writeTimeout) {
 		this.limit = limit;
 		this.writeTimeout = writeTimeout;
 	}
@@ -70,24 +77,50 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	}
 
 	@Override
-	public synchronized InputStream reader() {
+	public InputStream reader() throws IOException {
+		return createReader();
+	}
+
+	protected final synchronized RingBufferInputStream createReader() throws IOException {
+		checkClose();
 		RingBufferInputStream is = new RingBufferInputStream(this);
 		inputStreams.add(is);
 		return is;
 	}
 
 	@Override
-	public OutputStream writer() {
+	public OutputStream writer() throws IOException {
+		return createWriter();
+	}
+
+	protected final RingBufferOutputStream createWriter() throws IOException {
+		checkClose();
 		synchronized (writerMonitor) {
 			while (outputStream != null) {
 				try {
 					writerMonitor.wait();
 				} catch (InterruptedException e) {
-					throw new WaitForWriterInterruptedException(e);
+					throw new RingBufferInterruptedException();
 				}
 			}
 			outputStream = new RingBufferOutputStream(this);
 			return outputStream;
+		}
+	}
+
+	private synchronized void checkClose() throws RingBufferClosedException {
+		if (closed || closeRequested)
+			throw new RingBufferClosedException();
+	}
+
+	protected void releaseWriter(RingBufferOutputStream outputStream) {
+		synchronized (writerMonitor) {
+			if (this.outputStream != outputStream) {
+				throw new IllegalStateException(outputStream + " does is not that current writer, "
+						+ this.outputStream);
+			}
+			this.outputStream = null;
+			writerMonitor.notify();
 		}
 	}
 
@@ -106,44 +139,40 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 		}
 	}
 
-	protected void releaseWriter(RingBufferOutputStream outputStream) {
-		synchronized (writerMonitor) {
-			if (this.outputStream != outputStream) {
-				throw new IllegalStateException(outputStream + " does is not that current writer, "
-						+ this.outputStream);
-			}
-			this.outputStream = null;
-			writerMonitor.notify();
-		}
-	}
-
 	@Override
 	public synchronized int remove(int length) throws IOException {
+		checkClose();
 		int removed = Math.min(size(), length);
 		if (removed > 0)
 			updateState(s -> s.remove(removed));
 		return removed;
 	}
 
-	protected final void addInputStream(RingBufferInputStream is) {
-		inputStreams.add(is);
-	}
-
 	protected final synchronized void removeInputStream(RingBufferInputStream is) {
 		inputStreams.remove(is);
-	}
-
-	protected final synchronized void forEachInputStreams(Consumer<RingBufferInputStream> consumer) {
-		inputStreams.forEach(consumer);
+		notifyAll();
 	}
 
 	@Override
-	public synchronized void close() throws IOException {
-		RingBufferInputStream[] streams = inputStreams.toArray(new RingBufferInputStream[inputStreams.size()]);
-		for (RingBufferInputStream stream : streams) {
-			stream.close();
+	public void close() throws IOException {
+		requestClose();
+		waitWriterRelease();
+	}
+
+	private void waitWriterRelease() throws RingBufferInterruptedException {
+		synchronized (writerMonitor) {
+			while (outputStream != null) {
+				try {
+					writerMonitor.wait();
+				} catch (InterruptedException e) {
+					throw new RingBufferInterruptedException();
+				}
+			}
 		}
-		// wake up blocked readers
+	}
+
+	private synchronized void requestClose() {
+		closeRequested = true;
 		notifyAll();
 	}
 
@@ -203,8 +232,10 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 					linearBuffer = newBuffer;
 					inputStreams.forEach(is -> is.updateCapacity(newCapacity, fromState));
 				}
-			} else if (writeTimeout > 0) {
-				return waitFor(this::state, s -> availableToWrite(s) >= additional, s -> s,
+			} else if (writeTimeout >= 0) {
+				return waitFor(this::state,
+						s -> availableToWrite(s) >= additional,
+						s -> s,
 						writeTimeout, TimeUnit.MILLISECONDS);
 			} else {
 				throw new RingBufferOverflowException(newCapacity, limit);
@@ -238,35 +269,36 @@ public abstract class AbstractRingBuffer implements RingBuffer, Closeable {
 	}
 
 	protected final synchronized <C, T> T waitFor(Supplier<C> contextSupplier,
-			Predicate<C> contextPredicate,
-			IOFunction<C, T> contextHandler)
-			throws IOException {
-		return waitFor(contextSupplier, contextPredicate, contextHandler, 0, TimeUnit.MILLISECONDS);
-	}
-
-	protected final synchronized <C, T> T waitFor(Supplier<C> contextSupplier,
 			Predicate<C> contextPredicate, IOFunction<C, T> contextHandler,
 			long timeout, TimeUnit timeUnit)
 			throws IOException {
 
 		C last = contextSupplier.get();
-		long remaining = timeout > 0 ? timeUnit.toMillis(timeout) : 0;
+
+		long remaining = timeUnit.toMillis(timeout);
 		long timeLimit = System.currentTimeMillis() + remaining;
-		while (!contextPredicate.test(last) && remaining > 0) {
+		while (!closed() && remaining >= 0 && !contextPredicate.test(last)) {
 			try {
-				wait(remaining == Long.MAX_VALUE ? 0 : remaining);
+				wait(remaining);
 			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-				throw new RingBufferInterruptedException(e);
+				throw new RingBufferInterruptedException();
 			}
 			last = contextSupplier.get();
-			if (remaining != Long.MAX_VALUE)
+			if (remaining != 0)
 				remaining = timeLimit - System.currentTimeMillis();
 		}
+		
+		if (closed())
+			throw new RingBufferClosedException();
+
 		if (contextPredicate.test(last))
 			return contextHandler.apply(last);
 
 		throw new RingBufferTimeoutException("timed out after " + timeout + " " + timeUnit);
+	}
+
+	private synchronized boolean closed() {
+		return closed || closeRequested;
 	}
 
 	@Override

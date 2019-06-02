@@ -11,6 +11,7 @@ import java.util.Collections;
 
 import org.junit.Test;
 import org.yah.tools.queue.ObjectQueue;
+import org.yah.tools.queue.PollableObjectQueue;
 
 public class PersistentObjectQueueTest {
 
@@ -20,64 +21,70 @@ public class PersistentObjectQueueTest {
 			throw new IOException("Unable to create directory " + file.getParentFile());
 		if (delete && file.exists())
 			file.delete();
-		return PersistentObjectQueue.<String>builder().withFile(file).build();
+		return PersistentObjectQueue.builder().withFile(file).build();
 	}
 
-	private PersistentObjectQueue<String> newQueue() throws IOException {
+	private PollableObjectQueue<String> newQueue() throws IOException {
 		return createQueue(true);
 	}
 
-	private ObjectQueue<String> loadQueue() throws IOException {
+	private PollableObjectQueue<String> loadQueue() throws IOException {
 		return createQueue(false);
 	}
 
 	@Test
-	public void test_write() throws IOException {
-		try (ObjectQueue<String> buffer = newQueue()) {
-			assertEquals(0, buffer.elementsCount());
+	public void test_write() throws IOException, InterruptedException {
+		try (PollableObjectQueue<String> buffer = newQueue()) {
+			assertEquals(0, buffer.size());
 			buffer.offer(Collections.singleton("value"));
-			assertEquals(1, buffer.elementsCount());
+			assertEquals(1, buffer.size());
 			String actual = buffer.poll();
 			assertEquals("value", actual);
 		}
 	}
 
 	@Test
-	public void test_write_persistency() throws IOException {
+	public void test_write_persistency() throws IOException, InterruptedException {
 		try (ObjectQueue<String> buffer = newQueue()) {
 			buffer.offer(Collections.singleton("value"));
-			assertEquals(1, buffer.elementsCount());
+			assertEquals(1, buffer.size());
 		}
 
-		try (ObjectQueue<String> buffer = loadQueue()) {
-			assertEquals(1, buffer.elementsCount());
+		try (PollableObjectQueue<String> buffer = loadQueue()) {
+			assertEquals(1, buffer.size());
 			String actual = buffer.poll();
 			assertEquals("value", actual);
 		}
 	}
 
 	@Test
-	public void test_poll_autocommit() throws IOException {
-		try (ObjectQueue<String> buffer = newQueue()) {
+	public void test_poll() throws IOException, InterruptedException {
+		try (PollableObjectQueue<String> buffer = newQueue()) {
 			buffer.offer(Arrays.asList("value1", "value2"));
-			assertEquals(2, buffer.elementsCount());
+			assertEquals(2, buffer.size());
 
 			String actual = buffer.poll();
 			assertEquals("value1", actual);
-			assertEquals(2, buffer.elementsCount());
+			assertEquals(2, buffer.size());
 
 			actual = buffer.poll();
+			assertEquals("value1", actual);
+			assertEquals(2, buffer.size());
+			
+			buffer.commit();
+			
+			actual = buffer.poll();
 			assertEquals("value2", actual);
-			assertEquals(1, buffer.elementsCount());
+			assertEquals(1, buffer.size());
 
 			buffer.commit();
-			assertEquals(0, buffer.elementsCount());
+			assertEquals(0, buffer.size());
 		}
 	}
 
 	@Test
 	public void test_iterator() throws IOException {
-		try (PersistentObjectQueue<String> buffer = newQueue()) {
+		try (PollableObjectQueue<String> buffer = newQueue()) {
 			buffer.offer(Arrays.asList("value1", "value2", "value3"));
 			try (QueueCursor<String> cursor = buffer.cursor()) {
 				assertTrue(cursor.hasNext());

@@ -9,21 +9,21 @@ import java.io.IOException;
 import java.io.InputStream;
 
 import org.junit.Test;
-import org.yah.tools.ringbuffer.impl.AbstractRingBufferTest;
+import org.yah.tools.ringbuffer.impl.AbstractStreamRingBufferTest;
 import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
 
-public class ArrayRingBufferTest extends AbstractRingBufferTest<ArrayRingBuffer> {
+public class ArrayStreamRingBufferTest extends AbstractStreamRingBufferTest<ArrayStreamRingBuffer> {
 
 	protected static final int LIMIT = 64;
 
 	@Override
-	protected ArrayRingBuffer createRingBuffer(int capacity) throws IOException {
-		return new ArrayRingBuffer(capacity, LIMIT, 0);
+	protected ArrayStreamRingBuffer createRingBuffer(int capacity) throws IOException {
+		return new ArrayStreamRingBuffer(capacity, LIMIT, 0);
 	}
 
 	@Override
-	protected ArrayRingBuffer createFloodBuffer() throws IOException {
-		return new ArrayRingBuffer(CAPACITY, 1024 * 1024, Long.MAX_VALUE);
+	protected ArrayStreamRingBuffer createFloodBuffer() throws IOException {
+		return new ArrayStreamRingBuffer(CAPACITY, 1024 * 1024, Long.MAX_VALUE);
 	}
 
 	@Test

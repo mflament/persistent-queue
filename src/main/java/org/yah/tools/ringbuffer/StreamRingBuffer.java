@@ -11,7 +11,7 @@ import java.io.OutputStream;
  * @author Yah
  * @created 2019/05/10
  */
-public interface RingBuffer {
+public interface StreamRingBuffer {
 
 	/**
 	 * @return the current buffer size (in bytes)
@@ -21,12 +21,12 @@ public interface RingBuffer {
 	/**
 	 * @return a new InputStream starting from the current position.
 	 */
-	InputStream reader();
+	InputStream reader() throws IOException;
 
 	/**
 	 * @return the output stream used to write data to this buffer
 	 */
-	OutputStream writer();
+	OutputStream writer() throws IOException;
 
 	/**
 	 * Remove length bytes from buffer start. @throws

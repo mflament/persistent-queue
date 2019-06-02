@@ -5,24 +5,26 @@ import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.io.OutputStream;
-import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 
 import org.yah.tools.queue.ObjectQueue;
-import org.yah.tools.queue.impl.converters.SerializableConverter;
+import org.yah.tools.queue.PollableObjectQueue;
+import org.yah.tools.queue.impl.converters.StringObjectConverter;
 import org.yah.tools.ringbuffer.impl.RingBufferState;
+import org.yah.tools.ringbuffer.impl.RingBufferUtils;
 import org.yah.tools.ringbuffer.impl.RingPosition;
+import org.yah.tools.ringbuffer.impl.exceptions.RingBufferClosedException;
 import org.yah.tools.ringbuffer.impl.file.FileRingBuffer;
 import org.yah.tools.ringbuffer.impl.file.FileRingBuffer.SyncMode;
 
-public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
+public final class PersistentObjectQueue<E> implements PollableObjectQueue<E> {
 
 	private final ObjectFileRingBuffer<E> fileBuffer;
 
@@ -32,7 +34,9 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 
 	private final CappedInputStream cappedInputStream;
 
-	private int lastElementSize;
+	private SizedObject<E> lastElement;
+
+	private boolean interrupted;
 
 	private PersistentObjectQueue(Builder<E> builder)
 			throws IOException {
@@ -43,7 +47,7 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 	}
 
 	@Override
-	public int elementsCount() {
+	public int size() {
 		return state().elements();
 	}
 
@@ -60,51 +64,79 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 	 * @throws IOException
 	 */
 	@Override
-	public E poll() throws IOException {
-		commit();
-		lastElementSize = readInt(elementInputStream);
-		return readElement(cappedInputStream, lastElementSize);
+	public E poll() throws IOException, InterruptedException {
+		if (lastElement != null)
+			return lastElement.getElement();
+
+		try {
+			int size = readInt(elementInputStream);
+			E element = readElement(size);
+			lastElement = new SizedObject<>(element, size);
+			return element;
+		} catch (InterruptedIOException | RingBufferClosedException e) {
+			if (interrupted)
+				throw new InterruptedException();
+			throw e;
+		}
 	}
 
 	@Override
 	public void commit() throws IOException {
-		if (lastElementSize > 0) {
-			fileBuffer.remove(Integer.BYTES + lastElementSize, 1);
-			lastElementSize = 0;
+		if (lastElement != null) {
+			fileBuffer.remove(Integer.BYTES + lastElement.getSize(), 1);
+			lastElement = null;
 		}
 	}
 
 	@Override
-	public void transferTo(ObjectQueue<E> target, int length) throws IOException {
+	public void clear() throws IOException {
+		fileBuffer.remove(fileBuffer.size());
+		lastElement = null;
+	}
+
+	@Override
+	public void interrupt() {
+		interrupted = true;
+		RingBufferUtils.closeQuietly(elementInputStream);
+	}
+
+	void transferTo(ObjectQueue<E> target, int length) throws IOException {
 		if (!(target instanceof PersistentObjectQueue))
 			throw new IllegalArgumentException("Invalid target type " + target.getClass().getName());
 
+		int currentLength = fileBuffer.state().elements();
+		if (currentLength < length)
+			throw new IllegalArgumentException("Buffer elements count " + currentLength + " is less that requested length " + length);
+		
 		PersistentObjectQueue<E> persistentTarget = (PersistentObjectQueue<E>) target;
 		Collection<E> elements = new ArrayList<>(length);
-		int bufferSize;
-		try (QueueIterator iterator = new QueueIterator()) {
-			while (iterator.hasNext() && elements.size() < length) {
-				elements.add(iterator.next());
-			}
-			bufferSize = iterator.bufferSize();
+		int totalSize = 0;
+		while (elements.size() < length) {
+			int size = readInt(elementInputStream);
+			elements.add(readElement(size));
+			totalSize += size + Integer.BYTES;
 		}
 		persistentTarget.offer(elements);
-
-		fileBuffer.remove(bufferSize, elements.size());
+		fileBuffer.remove(totalSize, elements.size());
+		lastElement = null;
 	}
 
 	@Override
-	public QueueCursor<E> cursor() {
+	public QueueCursor<E> cursor() throws IOException {
 		return new QueueIterator();
 	}
 
 	@Override
-	public void offer(Iterator<E> elements) throws IOException {
+	public void offer(Collection<E> elements) throws IOException {
 		try (OutputStream outputStream = fileBuffer.writer()) {
-			while (elements.hasNext()) {
-				fileBuffer.writeElement(elements.next(), outputStream);
+			for (E element : elements) {
+				fileBuffer.writeElement(element, outputStream);
 			}
 		}
+	}
+
+	private E readElement(int elementSize) throws IOException {
+		return readElement(cappedInputStream, elementSize);
 	}
 
 	private E readElement(CappedInputStream is, int elementSize) throws IOException {
@@ -126,8 +158,8 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 				elementInputStream);
 	}
 
-	public static <E extends Serializable> Builder<E> builder() {
-		return new Builder<>(SerializableConverter.instance());
+	public static Builder<String> builder() {
+		return new Builder<>(StringObjectConverter.INSTANCE);
 	}
 
 	public static <E> Builder<E> builder(ObjectConverter<E> elementConverter) {
@@ -157,7 +189,7 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 
 		private int elementsCount;
 
-		public QueueIterator() {
+		public QueueIterator() throws IOException {
 			is = new CappedInputStream(fileBuffer.reader());
 		}
 
@@ -189,9 +221,6 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 			}
 		}
 
-		public int bufferSize() {
-			return elementsSize + elementsCount * Integer.BYTES;
-		}
 	}
 
 	private static class ObjectRingBufferState extends RingBufferState {
@@ -243,6 +272,11 @@ public final class PersistentObjectQueue<E> implements ObjectQueue<E> {
 		public ObjectFileRingBuffer(Builder builder, ObjectConverter<E> converter) throws IOException {
 			super(builder);
 			this.elementBuffer = new ElementBuffer<>(converter);
+		}
+
+		@Override
+		public ObjectRingBufferState state() {
+			return (ObjectRingBufferState) super.state();
 		}
 
 		public synchronized int remove(int length, int count) throws IOException {

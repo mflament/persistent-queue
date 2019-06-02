@@ -14,16 +14,16 @@ import org.yah.tools.queue.impl.ObjectConverter;
  * !!! Do not close input or output streams here, not our job !!!<br/>
  * So, we can not close the ObjectInputStream or ObjectOutputStream.
  */
-public class SerializableConverter<E extends Serializable> implements ObjectConverter<E> {
+public class SerializableObjectConverter<E extends Serializable> implements ObjectConverter<E> {
 
-	private static final SerializableConverter<Serializable> INSTANCE = new SerializableConverter<>();
+	private static final SerializableObjectConverter<Serializable> INSTANCE = new SerializableObjectConverter<>();
 
 	@SuppressWarnings("unchecked")
-	public static final <E extends Serializable> SerializableConverter<E> instance() {
-		return (SerializableConverter<E>) INSTANCE;
+	public static final <E extends Serializable> SerializableObjectConverter<E> instance() {
+		return (SerializableObjectConverter<E>) INSTANCE;
 	}
 
-	public SerializableConverter() {}
+	public SerializableObjectConverter() {}
 
 	@Override
 	@SuppressWarnings("unchecked")

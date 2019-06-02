@@ -18,19 +18,19 @@ import org.yah.tools.ringbuffer.impl.exceptions.RingBufferConcurrentModification
  * safe, so only one thread can use this {@link InputStream} at the same time.
  * 
  */
-public final class RingBufferInputStream extends InputStream {
+public class RingBufferInputStream extends InputStream {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(RingBufferInputStream.class);
 
 	private final byte[] singleByte = new byte[1];
 
-	private final AbstractRingBuffer ringBuffer;
+	private final AbstractStreamRingBuffer ringBuffer;
 
 	private RingPosition ringPosition;
 
 	private boolean closed;
 
-	public RingBufferInputStream(AbstractRingBuffer ringBuffer) {
+	public RingBufferInputStream(AbstractStreamRingBuffer ringBuffer) {
 		this.ringBuffer = ringBuffer;
 		this.ringPosition = ringBuffer.state().position();
 	}
@@ -42,6 +42,9 @@ public final class RingBufferInputStream extends InputStream {
 
 	@Override
 	public long skip(long n) throws IOException {
+		if (closed)
+			throw new RingBufferClosedException();
+		
 		ReadSnapshot snapshot = snapshot();
 		int available = snapshot.available();
 		if (available < 0)
@@ -63,9 +66,11 @@ public final class RingBufferInputStream extends InputStream {
 	}
 
 	@Override
-	public void close() throws IOException {
-		ringBuffer.removeInputStream(this);
-		closed = true;
+	public synchronized void close() throws IOException {
+		if (!closed) {
+			closed = true;
+			ringBuffer.removeInputStream(this);
+		}
 	}
 
 	@Override
@@ -75,7 +80,7 @@ public final class RingBufferInputStream extends InputStream {
 
 	public <T> T awaitInput(IOFunction<ReadSnapshot, T> handler) throws IOException {
 		try {
-			return this.awaitInput(handler, Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+			return this.awaitInput(handler, 0, TimeUnit.MILLISECONDS);
 		} catch (TimeoutException e) {
 			throw new IllegalStateException("timed out without time out ??", e);
 		}
