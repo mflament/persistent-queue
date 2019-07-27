@@ -12,18 +12,18 @@ import org.junit.Test;
 import org.yah.tools.ringbuffer.impl.AbstractStreamRingBufferTest;
 import org.yah.tools.ringbuffer.impl.RingBufferInputStream;
 
-public class ArrayStreamRingBufferTest extends AbstractStreamRingBufferTest<ArrayStreamRingBuffer> {
+public class ArrayRingBufferTest extends AbstractStreamRingBufferTest<ArrayRingBuffer> {
 
 	protected static final int LIMIT = 64;
 
 	@Override
-	protected ArrayStreamRingBuffer createRingBuffer(int capacity) throws IOException {
-		return new ArrayStreamRingBuffer(capacity, LIMIT, 0);
+	protected ArrayRingBuffer createRingBuffer(int capacity) throws IOException {
+		return new ArrayRingBuffer(capacity, LIMIT, 0);
 	}
 
 	@Override
-	protected ArrayStreamRingBuffer createFloodBuffer() throws IOException {
-		return new ArrayStreamRingBuffer(CAPACITY, 1024 * 1024, Long.MAX_VALUE);
+	protected ArrayRingBuffer createFloodBuffer() throws IOException {
+		return new ArrayRingBuffer(CAPACITY, 1024 * 1024, Long.MAX_VALUE);
 	}
 
 	@Test

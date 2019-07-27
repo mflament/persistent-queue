@@ -11,13 +11,13 @@ import org.yah.tools.ringbuffer.impl.RingBufferUtils;
 /**
  * In memory with byte[] implementation of {@link StreamRingBuffer}
  */
-public class ArrayStreamRingBuffer extends AbstractStreamRingBuffer {
+public class ArrayRingBuffer extends AbstractStreamRingBuffer {
 
-	public ArrayStreamRingBuffer(int capacity) throws IOException {
+	public ArrayRingBuffer(int capacity) throws IOException {
 		this(capacity, -1, 0);
 	}
 
-	public ArrayStreamRingBuffer(int capacity, int limit, long writeTimeout) throws IOException {
+	public ArrayRingBuffer(int capacity, int limit, long writeTimeout) throws IOException {
 		super(limit, writeTimeout);
 		capacity = RingBufferUtils.nextPowerOfTwo(capacity);
 		if (limit > 0 && limit < capacity)
