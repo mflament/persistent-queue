@@ -1,4 +1,4 @@
-package org.yah.tools.queue.impl;
+package org.yah.tools.queue;
 
 import java.io.Closeable;
 

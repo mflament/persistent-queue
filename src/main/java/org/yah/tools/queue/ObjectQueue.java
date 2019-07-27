@@ -6,8 +6,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.function.Consumer;
 
-import org.yah.tools.queue.impl.QueueCursor;
-
 public interface ObjectQueue<E> extends Closeable {
 
 	/**

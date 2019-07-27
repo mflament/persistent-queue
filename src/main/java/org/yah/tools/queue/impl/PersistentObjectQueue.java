@@ -16,6 +16,7 @@ import java.util.Objects;
 
 import org.yah.tools.queue.ObjectQueue;
 import org.yah.tools.queue.PollableObjectQueue;
+import org.yah.tools.queue.QueueCursor;
 import org.yah.tools.queue.impl.converters.StringObjectConverter;
 import org.yah.tools.ringbuffer.impl.RingBufferState;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils;

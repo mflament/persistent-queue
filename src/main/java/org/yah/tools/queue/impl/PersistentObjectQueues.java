@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yah.tools.queue.ObjectQueues;
 import org.yah.tools.queue.PollableObjectQueue;
+import org.yah.tools.queue.QueueCursor;
 import org.yah.tools.ringbuffer.impl.RingBufferUtils;
 
 public class PersistentObjectQueues<E> implements ObjectQueues<E> {

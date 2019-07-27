@@ -138,7 +138,7 @@ public class TaskQueuesExecutorTest {
 		int taskCount = queues.size();
 		final TaskGenerator<FloodTask> taskGenerator;
 		if (taskCount == 0) {
-			taskCount = 500_000;
+			taskCount = 100000;
 			taskGenerator = new TaskGenerator<>(taskCount, i -> new FloodTask("flood task-" + i, 1, false));
 		} else {
 			taskGenerator = null;

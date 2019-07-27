@@ -12,6 +12,7 @@ import java.util.Collections;
 import org.junit.Test;
 import org.yah.tools.queue.ObjectQueue;
 import org.yah.tools.queue.PollableObjectQueue;
+import org.yah.tools.queue.QueueCursor;
 
 public class PersistentObjectQueueTest {
 
