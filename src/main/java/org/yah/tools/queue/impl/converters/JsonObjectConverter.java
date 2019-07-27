@@ -8,13 +8,13 @@ import org.yah.tools.queue.impl.ObjectConverter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-public final class JsonTaskConverter<D> implements ObjectConverter<D> {
+public final class JsonObjectConverter<D> implements ObjectConverter<D> {
 
 	private final ObjectMapper objectMapper;
 
 	private final Class<D> dataType;
 
-	public JsonTaskConverter(ObjectMapper objectMapper, Class<D> dataType) {
+	public JsonObjectConverter(ObjectMapper objectMapper, Class<D> dataType) {
 		this.objectMapper = objectMapper;
 		this.dataType = dataType;
 	}
