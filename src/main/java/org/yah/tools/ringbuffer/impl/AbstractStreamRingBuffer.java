@@ -36,7 +36,7 @@ public abstract class AbstractStreamRingBuffer implements StreamRingBuffer, Clos
 	 * <li>if < 0 : no wait and {@link BufferOverflowException} will be thrown</li>
 	 * <li>if == 0 : means no timeout and wait indefinitely (until buffer is closed
 	 * or writer thread is interrupted)</li>
-	 * <li>else wait for the specified timeout befere throwing an
+	 * <li>else wait for the specified timeout before throwing an
 	 * {@link RingBufferTimeoutException}</li>
 	 * </ul>
 	 */
